@@ -123,14 +123,38 @@ step "Tijdelijke bestanden opruimen"
 rm -rf "$BUNDLE_DIR"
 ok "bundled_libreoffice/ verwijderd"
 
+# ── 10. Installatie-DMG aanmaken ──────────────────────────────────────────────
+# Maakt een DMG met een Applications-alias zodat gebruikers alleen maar de app
+# naar de map hoeven te slepen — geen Terminal nodig.
+step "Installatie-DMG aanmaken"
+DMG_OUT="dist/PrintScript_${MACHINE}.dmg"
+DMG_STAGING=$(mktemp -d)
+
+cp -r dist/PrintScript.app "$DMG_STAGING/"
+ln -s /Applications "$DMG_STAGING/Applications"
+
+hdiutil create \
+  -volname  "PrintScript" \
+  -srcfolder "$DMG_STAGING" \
+  -ov \
+  -format   UDZO \
+  "$DMG_OUT" \
+  -quiet
+
+rm -rf "$DMG_STAGING"
+DMG_SIZE=$(du -sh "$DMG_OUT" 2>/dev/null | cut -f1 || echo "?")
+ok "DMG aangemaakt: $DMG_OUT  (${DMG_SIZE})"
+
 # ── Klaar ─────────────────────────────────────────────────────────────────────
 APP_SIZE=$(du -sh dist/PrintScript.app 2>/dev/null | cut -f1 || echo "?")
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo -e "${GREEN}✅  Klaar!${NC}"
 echo ""
-echo "   App:    dist/PrintScript.app  (${APP_SIZE})"
+echo "   App:    dist/PrintScript.app      (${APP_SIZE})"
+echo "   DMG:    ${DMG_OUT}  (${DMG_SIZE})"
 echo ""
 echo "   Testen:     open dist/PrintScript.app"
-echo "   Installeren: cp -r dist/PrintScript.app /Applications/"
+echo "   Installeren: open ${DMG_OUT}"
+echo "   (sleep PrintScript naar Applications in het venster)"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

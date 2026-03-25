@@ -1,0 +1,90 @@
+name: Build macOS App
+
+# Triggers:
+#   • Automatisch bij een versie-tag  (git tag v1.2.3 && git push --tags)
+#   • Handmatig via de "Run workflow"-knop op github.com/janpaulb/printscript/actions
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-14   # Apple Silicon (arm64)
+            arch:   arm64
+            lo_arch: aarch64
+          - runner: macos-13   # Intel (x86_64)
+            arch:   x86_64
+            lo_arch: x86_64
+
+    steps:
+      # ── Broncode ophalen ────────────────────────────────────────────────────
+      - uses: actions/checkout@v4
+
+      # ── Python instellen ────────────────────────────────────────────────────
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # ── LibreOffice-versie opzoeken (voor de cache-sleutel) ─────────────────
+      - name: Nieuwste LibreOffice-versie opzoeken
+        id: lo_version
+        run: |
+          LO_INDEX="https://download.documentfoundation.org/libreoffice/stable/"
+          VERSION=$(curl -s "$LO_INDEX" \
+            | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?' \
+            | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n \
+            | tail -1)
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Nieuwste versie: $VERSION"
+
+      # ── LibreOffice-DMG cachen (~400 MB, vermijdt herhaalde downloads) ───────
+      - name: LibreOffice-DMG cachen
+        uses: actions/cache@v4
+        with:
+          path: /tmp/LibreOffice_*.dmg
+          key: lo-${{ matrix.lo_arch }}-${{ steps.lo_version.outputs.version }}
+
+      # ── App bouwen ──────────────────────────────────────────────────────────
+      - name: PrintScript.app bouwen
+        run: |
+          chmod +x build_mac.sh
+          ./build_mac.sh
+
+      # ── DMG uploaden als artifact ────────────────────────────────────────────
+      - name: DMG uploaden
+        uses: actions/upload-artifact@v4
+        with:
+          name: PrintScript-${{ matrix.arch }}
+          path: dist/PrintScript_${{ matrix.arch }}.dmg
+          retention-days: 30
+
+      # ── GitHub Release aanmaken (alleen bij een tag) ─────────────────────────
+      - name: GitHub Release publiceren
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: PrintScript ${{ github.ref_name }}
+          body: |
+            ## Installeren
+
+            1. Download de DMG voor jouw Mac:
+               - **Apple Silicon (M1/M2/M3/M4)** → `PrintScript_arm64.dmg`
+               - **Intel** → `PrintScript_x86_64.dmg`
+            2. Open de DMG
+            3. Sleep **PrintScript** naar **Applications**
+            4. Dubbelklik op PrintScript in je Applications-map
+
+            > Eerste keer openen: rechtsklik → "Open" als macOS een beveiligingswaarschuwing geeft.
+          files: dist/PrintScript_${{ matrix.arch }}.dmg
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true

@@ -12,8 +12,22 @@ Converteer Word-documenten (.docx) naar drukklare PDF's — via de browser of al
 
 ---
 
+## Downloaden (macOS — geen Terminal nodig)
+
+1. Ga naar **[Releases](../../releases/latest)**
+2. Download de DMG voor jouw Mac:
+   - **Apple Silicon (M1/M2/M3/M4)** → `PrintScript_arm64.dmg`
+   - **Intel** → `PrintScript_x86_64.dmg`
+3. Open de DMG en sleep **PrintScript** naar **Applications**
+4. Dubbelklik op PrintScript in je Applications-map
+
+> Eerste keer openen: rechtsklik op het app-icoontje → **"Open"** als macOS een beveiligingswaarschuwing geeft (Gatekeeper).
+
+---
+
 ## Inhoud
 
+- [Downloaden (macOS)](#downloaden-macos--geen-terminal-nodig)
 - [Snel starten (webserver)](#snel-starten-webserver)
 - [Native macOS-app bouwen](#native-macos-app-bouwen)
 - [Google Docs-ondersteuning](#google-docs-ondersteuning)
@@ -85,11 +99,23 @@ Het script:
 # Testen
 open dist/PrintScript.app
 
-# Installeren
-cp -r dist/PrintScript.app /Applications/
+# Installeren via DMG (sleep-naar-Applications venster)
+open dist/PrintScript_arm64.dmg   # Apple Silicon
+open dist/PrintScript_x86_64.dmg  # Intel
 ```
 
 **Appgrootte:** ±500–600 MB (LibreOffice is groot).
+
+### Automatisch bouwen via GitHub Actions
+
+Push een versie-tag en GitHub bouwt de DMG automatisch voor beide architecturen:
+
+```bash
+git tag v1.0.0
+git push --tags
+```
+
+De DMGs verschijnen onder **Releases** zodra de build klaar is (~10–15 minuten). Teamleden en eindgebruikers downloaden gewoon de DMG — geen Terminal, geen Python, geen LibreOffice installeren.
 
 ### Automatische LibreOffice-updates
 
