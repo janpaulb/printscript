@@ -14,51 +14,76 @@
         <span class="logo-icon">&#9654;</span>
         <span class="logo-text">PrintScript</span>
       </div>
-      <p class="tagline">Van Word-document naar print-ready script</p>
+      <p class="tagline">Van Word-document of Google Docs naar print-ready script</p>
     </header>
 
     <main>
-      <!-- Upload card -->
+      <!-- Upload / convert card -->
       <div class="card" id="upload-card">
-        <div
-          class="drop-zone"
-          id="drop-zone"
-          role="button"
-          tabindex="0"
-          aria-label="Sleep je .docx bestand hierheen of klik om te bladeren"
-        >
-          <div class="drop-icon">&#128196;</div>
-          <p class="drop-primary">Sleep je <strong>.docx</strong> bestand hierheen</p>
-          <p class="drop-secondary">of</p>
-          <label class="btn btn-outline" for="file-input">Bladeren</label>
-          <input
-            type="file"
-            id="file-input"
-            accept=".docx"
-            aria-label="Selecteer een Word-document"
-          />
-          <p class="drop-hint" id="file-name-display">Geen bestand geselecteerd</p>
+
+        <!-- Tab switcher -->
+        <div class="tabs" role="tablist">
+          <button class="tab active" id="tab-file" role="tab" aria-selected="true"
+                  aria-controls="panel-file" data-panel="panel-file">
+            &#128196; Word-bestand
+          </button>
+          <button class="tab" id="tab-url" role="tab" aria-selected="false"
+                  aria-controls="panel-url" data-panel="panel-url">
+            &#128279; Google Docs link
+          </button>
         </div>
 
+        <!-- Panel: file upload -->
+        <div id="panel-file" class="tab-panel" role="tabpanel" aria-labelledby="tab-file">
+          <div
+            class="drop-zone"
+            id="drop-zone"
+            role="button"
+            tabindex="0"
+            aria-label="Sleep je .docx bestand hierheen of klik om te bladeren"
+          >
+            <div class="drop-icon">&#128196;</div>
+            <p class="drop-primary">Sleep je <strong>.docx</strong> bestand hierheen</p>
+            <p class="drop-secondary">of</p>
+            <label class="btn btn-outline" for="file-input">Bladeren</label>
+            <input type="file" id="file-input" accept=".docx"
+                   aria-label="Selecteer een Word-document" />
+            <p class="drop-hint" id="file-name-display">Geen bestand geselecteerd</p>
+          </div>
+        </div>
+
+        <!-- Panel: Google Docs URL -->
+        <div id="panel-url" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-url">
+          <div class="url-panel">
+            <label class="url-label" for="gdocs-url">Google Docs URL</label>
+            <input
+              type="url"
+              id="gdocs-url"
+              class="url-input"
+              placeholder="https://docs.google.com/document/d/…/edit"
+              autocomplete="off"
+              spellcheck="false"
+            />
+            <p class="url-hint">
+              Het document moet gedeeld zijn via
+              <strong>"Iedereen met de link kan bekijken"</strong>.
+            </p>
+          </div>
+        </div>
+
+        <!-- What the tool does -->
         <div class="checklist">
           <h3>Wat wordt gedaan bij de conversie</h3>
           <ul>
-            <li>
-              <span class="check">&#10003;</span>
-              Alle <strong>commentaren</strong> worden verwijderd
-            </li>
-            <li>
-              <span class="check">&#10003;</span>
-              Alle <strong>arceringen</strong> worden verwijderd (tekstkleur blijft behouden)
-            </li>
-            <li>
-              <span class="check">&#10003;</span>
-              Alle <strong>afbeeldingen na pagina 1</strong> worden verwijderd
-            </li>
-            <li>
-              <span class="check">&#10003;</span>
-              <strong>Paginanummering</strong> in de footer blijft staan
-            </li>
+            <li><span class="check">&#10003;</span>
+              Alle <strong>commentaren</strong> worden verwijderd</li>
+            <li><span class="check">&#10003;</span>
+              Alle <strong>arceringen</strong> worden verwijderd (tekstkleur blijft behouden)</li>
+            <li><span class="check">&#10003;</span>
+              Alle <strong>afbeeldingen na pagina 1</strong> worden verwijderd &mdash;
+              afbeeldingen op pagina 1 blijven volledig intact</li>
+            <li><span class="check">&#10003;</span>
+              <strong>Paginanummering</strong> in de footer blijft staan</li>
           </ul>
         </div>
 

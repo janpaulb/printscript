@@ -69,7 +69,7 @@ header { text-align: center; }
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 32px;
+  padding: 28px 32px 32px;
   display: flex;
   flex-direction: column;
   gap: 24px;
@@ -77,11 +77,46 @@ header { text-align: center; }
 
 .hidden { display: none !important; }
 
+/* ── Tabs ─────────────────────────────────────────────────────────────── */
+.tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+}
+
+.tab {
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  font-size: .88rem;
+  font-weight: 500;
+  padding: 8px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background var(--transition), color var(--transition);
+  white-space: nowrap;
+}
+
+.tab:hover { color: var(--text); }
+
+.tab.active {
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ── Tab panels ───────────────────────────────────────────────────────── */
+.tab-panel { display: flex; flex-direction: column; }
+
 /* ── Drop zone ────────────────────────────────────────────────────────── */
 .drop-zone {
   border: 2px dashed var(--border);
   border-radius: var(--radius);
-  padding: 40px 24px;
+  padding: 36px 24px;
   text-align: center;
   cursor: pointer;
   transition: border-color var(--transition), background var(--transition);
@@ -100,19 +135,53 @@ header { text-align: center; }
 }
 
 .drop-icon { font-size: 2.5rem; line-height: 1; }
-
 .drop-primary { font-size: 1rem; }
-
 .drop-secondary { color: var(--text-muted); font-size: .85rem; }
-
 .drop-hint {
   margin-top: 4px;
   font-size: .8rem;
   color: var(--text-muted);
   min-height: 1.2em;
 }
-
 #file-input { display: none; }
+
+/* ── URL panel ────────────────────────────────────────────────────────── */
+.url-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px 0 4px;
+}
+
+.url-label {
+  font-size: .85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.url-input {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: .95rem;
+  padding: 12px 14px;
+  outline: none;
+  transition: border-color var(--transition);
+  width: 100%;
+}
+
+.url-input::placeholder { color: var(--text-muted); }
+
+.url-input:focus { border-color: var(--accent); }
+
+.url-hint {
+  font-size: .8rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
 
 /* ── Checklist ────────────────────────────────────────────────────────── */
 .checklist h3 {
@@ -158,24 +227,15 @@ header { text-align: center; }
   text-align: center;
 }
 
-.btn-primary {
-  background: var(--accent);
-  color: #fff;
-}
-
+.btn-primary { background: var(--accent); color: #fff; }
 .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
-
-.btn-primary:disabled {
-  opacity: .4;
-  cursor: not-allowed;
-}
+.btn-primary:disabled { opacity: .4; cursor: not-allowed; }
 
 .btn-outline {
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border);
 }
-
 .btn-outline:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ── Progress ─────────────────────────────────────────────────────────── */
@@ -199,9 +259,7 @@ header { text-align: center; }
 
 /* ── Error ────────────────────────────────────────────────────────────── */
 #error-card { align-items: center; padding: 40px 32px; }
-
 .error-icon { font-size: 2.5rem; }
-
 .error-text {
   color: var(--error);
   text-align: center;

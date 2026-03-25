@@ -32,27 +32,39 @@ def _iter_body_elements(doc):
 
 def _find_first_pagebreak_index(doc):
     """
-    Return the index (among body children) of the first explicit page break.
+    Return the index (among body children) just AFTER the last element that
+    belongs to page 1.
 
-    An explicit page break is either:
-      - <w:br w:type="page"/> inside a run
-      - A paragraph whose section properties use type="nextPage"
+    A page boundary is detected by:
+      1. An explicit <w:br w:type="page"/> inside a run, OR
+      2. A <w:sectPr> with type nextPage / evenPage / oddPage inside a
+         paragraph's <w:pPr> (i.e. a section break that starts a new page),
+      3. A <w:sectPr> with no <w:type> child (default = nextPage).
 
-    Returns None if no explicit page break is found (all content is page 1).
+    The BODY-LEVEL <w:sectPr> (always the very last child) is intentionally
+    ignored – it describes the last section of the document, not a page break.
+
+    Returns None if no page break is found (treat whole document as page 1).
     """
     body = doc.element.body
     children = list(body)
+    body_sectPr = body.find(qn('w:sectPr'))  # final body-level sectPr
 
     for idx, child in enumerate(children):
-        # Check for <w:br w:type="page"/> anywhere inside this element
+        # ── Explicit page break ──────────────────────────────────────────
         for br in child.iter(qn('w:br')):
             if br.get(qn('w:type')) == 'page':
                 return idx
 
-        # Check for section break of type nextPage inside a paragraph's pPr
+        # ── Section break inside a paragraph (pPr/sectPr) ────────────────
         for sectPr in child.iter(qn('w:sectPr')):
+            if sectPr is body_sectPr:
+                continue  # skip the document-final sectPr
             t = sectPr.find(qn('w:type'))
-            if t is not None and t.get(qn('w:val')) in ('nextPage', 'evenPage', 'oddPage'):
+            # No <w:type> means nextPage (Word default), so always treat as break
+            if t is None or t.get(qn('w:val')) in (
+                'nextPage', 'evenPage', 'oddPage'
+            ):
                 return idx
 
     return None

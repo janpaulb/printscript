@@ -1,20 +1,58 @@
 /* PrintScript – frontend logic */
 
-const dropZone      = document.getElementById('drop-zone');
-const fileInput     = document.getElementById('file-input');
-const fileDisplay   = document.getElementById('file-name-display');
-const convertBtn    = document.getElementById('convert-btn');
-const uploadCard    = document.getElementById('upload-card');
-const progressCard  = document.getElementById('progress-card');
-const statusText    = document.getElementById('status-text');
-const errorCard     = document.getElementById('error-card');
-const errorText     = document.getElementById('error-text');
-const retryBtn      = document.getElementById('retry-btn');
+// ── Element refs ───────────────────────────────────────────────────────────
+const uploadCard   = document.getElementById('upload-card');
+const progressCard = document.getElementById('progress-card');
+const errorCard    = document.getElementById('error-card');
+const statusText   = document.getElementById('status-text');
+const errorText    = document.getElementById('error-text');
+const convertBtn   = document.getElementById('convert-btn');
+const retryBtn     = document.getElementById('retry-btn');
 
+// File tab
+const dropZone     = document.getElementById('drop-zone');
+const fileInput    = document.getElementById('file-input');
+const fileDisplay  = document.getElementById('file-name-display');
+
+// URL tab
+const gdocsInput   = document.getElementById('gdocs-url');
+
+// Tabs
+const tabs         = document.querySelectorAll('.tab');
+const panels       = document.querySelectorAll('.tab-panel');
+
+// ── State ──────────────────────────────────────────────────────────────────
+let activeTab    = 'file';  // 'file' | 'url'
 let selectedFile = null;
 
-// ── File selection ─────────────────────────────────────────────────────────
+// ── Tab switching ──────────────────────────────────────────────────────────
+tabs.forEach(tab => {
+  tab.addEventListener('click', () => {
+    const panelId = tab.dataset.panel;
+    activeTab = panelId === 'panel-file' ? 'file' : 'url';
 
+    tabs.forEach(t => {
+      t.classList.toggle('active', t === tab);
+      t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
+    });
+    panels.forEach(p => p.classList.toggle('hidden', p.id !== panelId));
+
+    updateConvertBtn();
+  });
+});
+
+// ── Convert button enable/disable ──────────────────────────────────────────
+function updateConvertBtn() {
+  if (activeTab === 'file') {
+    convertBtn.disabled = !selectedFile;
+  } else {
+    convertBtn.disabled = gdocsInput.value.trim().length === 0;
+  }
+}
+
+gdocsInput.addEventListener('input', updateConvertBtn);
+
+// ── File selection ─────────────────────────────────────────────────────────
 function selectFile(file) {
   if (!file) return;
   if (!file.name.toLowerCase().endsWith('.docx')) {
@@ -23,94 +61,82 @@ function selectFile(file) {
   }
   selectedFile = file;
   fileDisplay.textContent = file.name;
-  convertBtn.disabled = false;
+  updateConvertBtn();
 }
 
 fileInput.addEventListener('change', () => selectFile(fileInput.files[0]));
 
-// Click on the drop-zone (but not on the label/button inside it)
 dropZone.addEventListener('click', (e) => {
   if (e.target.closest('label, button')) return;
   fileInput.click();
 });
 
 dropZone.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' || e.key === ' ') {
-    e.preventDefault();
-    fileInput.click();
-  }
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
 });
-
-// ── Drag & drop ────────────────────────────────────────────────────────────
 
 ['dragenter', 'dragover'].forEach(evt =>
-  dropZone.addEventListener(evt, (e) => {
-    e.preventDefault();
-    dropZone.classList.add('drag-over');
-  })
+  dropZone.addEventListener(evt, (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); })
 );
-
 ['dragleave', 'drop'].forEach(evt =>
-  dropZone.addEventListener(evt, (e) => {
-    e.preventDefault();
-    dropZone.classList.remove('drag-over');
-  })
+  dropZone.addEventListener(evt, (e) => { e.preventDefault(); dropZone.classList.remove('drag-over'); })
 );
-
-dropZone.addEventListener('drop', (e) => {
-  const file = e.dataTransfer.files[0];
-  selectFile(file);
-});
+dropZone.addEventListener('drop', (e) => selectFile(e.dataTransfer.files[0]));
 
 // ── Conversion ─────────────────────────────────────────────────────────────
-
 convertBtn.addEventListener('click', () => {
-  if (!selectedFile) return;
-  startConversion();
+  if (activeTab === 'file' && selectedFile) startFileConversion();
+  else if (activeTab === 'url') startUrlConversion();
 });
 
-function startConversion() {
+function startFileConversion() {
   showProgress('Document verwerken\u2026');
-
   const formData = new FormData();
   formData.append('file', selectedFile);
 
-  fetch('/convert', {
+  fetch('/convert', { method: 'POST', body: formData })
+    .then(handleConvertResponse)
+    .catch(err => showError(err.message || 'Onbekende fout.'));
+}
+
+function startUrlConversion() {
+  const url = gdocsInput.value.trim();
+  if (!url) return;
+  showProgress('Google Docs ophalen en verwerken\u2026');
+
+  fetch('/convert-url', {
     method: 'POST',
-    body: formData,
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url }),
   })
-    .then(async (response) => {
-      if (!response.ok) {
-        // Try to parse JSON error message
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data.error || `Server fout: ${response.status}`);
-      }
+    .then(handleConvertResponse)
+    .catch(err => showError(err.message || 'Onbekende fout.'));
+}
 
-      // Stream the PDF blob and trigger download
-      const blob = await response.blob();
-      const contentDisposition = response.headers.get('Content-Disposition') || '';
-      const match = contentDisposition.match(/filename[^;=\n]*=["']?([^"';\n]+)/);
-      const filename = match ? match[1] : 'printscript.pdf';
+async function handleConvertResponse(response) {
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({}));
+    throw new Error(data.error || `Server fout: ${response.status}`);
+  }
 
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+  const blob = await response.blob();
+  const cd = response.headers.get('Content-Disposition') || '';
+  const match = cd.match(/filename[^;=\n]*=["']?([^"';\n]+)/);
+  const filename = match ? match[1] : 'printscript.pdf';
 
-      // Return to upload view after short delay
-      setTimeout(resetToUpload, 800);
-    })
-    .catch((err) => {
-      showError(err.message || 'Er is een onbekende fout opgetreden.');
-    });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+
+  setTimeout(resetToUpload, 800);
 }
 
 // ── State helpers ──────────────────────────────────────────────────────────
-
 function showProgress(msg) {
   uploadCard.classList.add('hidden');
   errorCard.classList.add('hidden');
@@ -132,7 +158,7 @@ function resetToUpload() {
   selectedFile = null;
   fileInput.value = '';
   fileDisplay.textContent = 'Geen bestand geselecteerd';
-  convertBtn.disabled = true;
+  updateConvertBtn();
 }
 
 retryBtn.addEventListener('click', resetToUpload);
