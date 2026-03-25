@@ -266,48 +266,74 @@ def _remove_drawing_elements(element):
 # 4. Convert processed .docx → PDF via LibreOffice
 # ---------------------------------------------------------------------------
 
+def _lo_cmd(binary: str, profile_dir: str, output_dir: str, docx_path: str) -> list:
+    return [
+        binary,
+        '--headless',
+        '--norestore',
+        '--nofirststartwizard',
+        f'-env:UserInstallation=file://{profile_dir}',
+        '--convert-to', 'pdf',
+        '--outdir', output_dir,
+        docx_path,
+    ]
+
+
+def _is_display_error(stderr: str) -> bool:
+    markers = ('windowing system', 'cannot connect to x', 'no display', 'headless')
+    low = stderr.lower()
+    return any(m in low for m in markers)
+
+
 def convert_to_pdf(docx_path: str, output_dir: str) -> str:
     """
     Convert a .docx file to PDF using LibreOffice headless.
 
-    Each call gets an isolated LibreOffice user profile so that concurrent
-    conversions don't clash on the shared default profile directory.
+    Attempt order (Linux servers without a display):
+      1. SAL_USE_VCLPLUGIN=svp  – headless software renderer (needs libreoffice-headless)
+      2. xvfb-run               – virtual X11 framebuffer (needs xvfb)
+    On macOS the svp plugin is not available; LibreOffice uses its native
+    renderer which works headlessly without any extra setup.
 
-    Returns the path to the generated PDF.
-    Raises RuntimeError on failure.
+    Each call gets an isolated LibreOffice user profile so concurrent
+    conversions don't clash on the shared default profile directory.
     """
-    # Unique profile dir prevents lock conflicts under concurrent load
     profile_dir = os.path.join(output_dir, f'lo_profile_{uuid.uuid4().hex}')
     os.makedirs(profile_dir, exist_ok=True)
 
-    # Build a clean environment for the subprocess.
-    # SAL_USE_VCLPLUGIN=svp forces the headless SVP renderer so LibreOffice
-    # never tries to open an X11/Wayland display — even without --headless.
-    # DISPLAY is removed for the same reason (avoids "no windowing system" crash
-    # on Linux servers). HOME must stay set so LibreOffice can write temp files.
+    binary = _find_libreoffice()
+    cmd    = _lo_cmd(binary, profile_dir, output_dir, docx_path)
+
+    # ── Attempt 1: SAL_USE_VCLPLUGIN=svp (headless renderer) ────────────────
     env = os.environ.copy()
     env['SAL_USE_VCLPLUGIN'] = 'svp'
     env.pop('DISPLAY', None)
     env.pop('WAYLAND_DISPLAY', None)
 
-    result = subprocess.run(
-        [
-            _find_libreoffice(),
-            '--headless',
-            '--norestore',
-            '--nofirststartwizard',
-            f'-env:UserInstallation=file://{profile_dir}',
-            '--convert-to', 'pdf',
-            '--outdir', output_dir,
-            docx_path,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env=env,
-    )
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
+
+    # ── Attempt 2: xvfb-run (virtual X11 framebuffer) ────────────────────────
+    # Fallback for LibreOffice builds that don't ship the svp plugin
+    # (common on Debian/Ubuntu when only libreoffice-writer is installed).
+    if result.returncode != 0 and _is_display_error(result.stderr):
+        xvfb = shutil.which('xvfb-run')
+        if xvfb:
+            env2 = os.environ.copy()
+            env2.pop('DISPLAY', None)
+            env2.pop('WAYLAND_DISPLAY', None)
+            result = subprocess.run(
+                [xvfb, '-a', '--server-args=-screen 0 1024x768x24'] + cmd,
+                capture_output=True, text=True, timeout=120, env=env2,
+            )
 
     if result.returncode != 0:
+        if _is_display_error(result.stderr):
+            raise RuntimeError(
+                'LibreOffice kan geen display vinden.\n'
+                'Installeer één van de volgende pakketten en start opnieuw:\n'
+                '  sudo apt-get install libreoffice-headless\n'
+                '  of: sudo apt-get install xvfb'
+            )
         raise RuntimeError(
             f'PDF-conversie mislukt (LibreOffice rc={result.returncode}):\n'
             f'{result.stderr}'

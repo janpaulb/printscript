@@ -42,15 +42,23 @@ Converteer Word-documenten (.docx) naar drukklare PDF's — via de browser of al
 ### Vereisten
 
 - Python 3.11 of hoger
-- LibreOffice met Writer-module
+- LibreOffice (inclusief de headless backend)
 
 ```bash
-# Debian / Ubuntu
-sudo apt-get install libreoffice-writer
+# Debian / Ubuntu (server / VPS — zonder GUI)
+sudo apt-get install libreoffice-writer libreoffice-headless
+
+# Debian / Ubuntu (als bovenstaande niet werkt: virtueel X11-scherm)
+sudo apt-get install xvfb
 
 # macOS (Homebrew)
 brew install --cask libreoffice
 ```
+
+> **Fout "no suitable windowing system found"?**
+> LibreOffice mist de headless-renderer. Voer het volgende uit:
+> `sudo apt-get install libreoffice-headless`
+> Als dat niet helpt: `sudo apt-get install xvfb` — PrintScript valt daar automatisch op terug.
 
 ### Installeren en draaien
 
