@@ -7,6 +7,7 @@ import io
 import os
 import re
 import shutil
+import sys
 import tempfile
 import uuid
 from pathlib import Path
@@ -16,7 +17,20 @@ from flask import Flask, jsonify, render_template, request, send_file
 from processor import process
 from gdocs import download_as_docx, extract_doc_id
 
-app = Flask(__name__)
+# When running as a PyInstaller bundle, templates and static files are
+# extracted to sys._MEIPASS. main.py sets PRINTSCRIPT_BASE_DIR accordingly.
+# In development, __file__ resolves to the project directory.
+_base_dir = (
+    os.environ.get('PRINTSCRIPT_BASE_DIR')
+    or (sys._MEIPASS if getattr(sys, 'frozen', False) else None)  # type: ignore[attr-defined]
+    or os.path.dirname(os.path.abspath(__file__))
+)
+
+app = Flask(
+    __name__,
+    template_folder=os.path.join(_base_dir, 'templates'),
+    static_folder=os.path.join(_base_dir, 'static'),
+)
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB upload limit
 
 ALLOWED_EXTENSIONS = {'.docx'}
