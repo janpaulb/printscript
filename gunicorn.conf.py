@@ -35,11 +35,11 @@ max_requests      = 500
 max_requests_jitter = 50
 
 
-def post_fork(server, worker):
+def on_starting(server):
     """
-    Called in each worker process after forking.
-    Ensures LibreOffice headless support is available before the worker
-    accepts its first request.
+    Called once in the master process before any workers are forked.
+    Installing libreoffice-headless here means workers inherit the result
+    immediately — no concurrent apt-get calls, no per-worker overhead.
     """
     try:
         from processor import bootstrap_headless_libreoffice

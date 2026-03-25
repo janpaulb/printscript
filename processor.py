@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import uuid
 
 from docx import Document
@@ -25,6 +26,9 @@ from docx.oxml.ns import qn
 # ---------------------------------------------------------------------------
 
 log = logging.getLogger(__name__)
+
+_bootstrap_lock = threading.Lock()
+_bootstrap_done = False
 
 
 def _try_apt_install(*packages: str) -> bool:
@@ -59,15 +63,35 @@ def _lo_works_headless() -> bool:
     Instead we check directly whether the svp VCL plugin library exists on
     disk (installed by the libreoffice-headless package) or whether xvfb-run
     is available as a fallback display server.
+
+    We search all known install locations:
+      - /usr/lib/libreoffice     (Debian/Ubuntu standard)
+      - /usr/lib64/libreoffice   (RHEL/Fedora/openSUSE)
+      - /opt/libreoffice*        (manually downloaded tarball)
+      - /snap/libreoffice/*      (Snap package)
+      - directory next to the libreoffice binary (custom/portable installs)
     """
     if sys.platform != 'linux':
         return True  # macOS uses its native renderer; no special setup needed
 
     import glob as _glob
 
-    # libreoffice-headless installs the svp plugin, e.g. libvclplug_svplo.so
-    if _glob.glob('/usr/lib/libreoffice/program/libvclplug_svp*.so'):
+    # Candidate glob patterns — order is fastest-match-first
+    patterns = [
+        '/usr/lib/libreoffice/program/libvclplug_svp*.so',
+        '/usr/lib64/libreoffice/program/libvclplug_svp*.so',
+        '/opt/libreoffice*/program/libvclplug_svp*.so',
+        '/snap/libreoffice/*/usr/lib/libreoffice/program/libvclplug_svp*.so',
+    ]
+    if any(_glob.glob(p) for p in patterns):
         return True
+
+    # Also check relative to the actual soffice binary (handles custom/portable installs)
+    lo_bin = shutil.which('libreoffice') or shutil.which('soffice')
+    if lo_bin:
+        prog_dir = os.path.dirname(os.path.realpath(lo_bin))
+        if _glob.glob(os.path.join(prog_dir, 'libvclplug_svp*.so')):
+            return True
 
     # xvfb-run provides a virtual X11 display as a fallback
     return bool(shutil.which('xvfb-run'))
@@ -75,42 +99,61 @@ def _lo_works_headless() -> bool:
 
 def bootstrap_headless_libreoffice() -> None:
     """
-    Called once at app startup (from app.py __main__).
+    Ensure LibreOffice can run headlessly. Safe to call from multiple threads
+    or processes: the inner work runs exactly once per process thanks to a
+    module-level lock + flag; apt-get's own advisory lock prevents concurrent
+    installs across processes.
 
-    On Linux: verifies that LibreOffice can run without a display.
-    If it cannot, automatically installs the missing packages:
-      1. libreoffice-headless  (svp VCL renderer — preferred)
-      2. xvfb                  (virtual X11 framebuffer — fallback)
+    On Linux: verifies that the svp VCL plugin is present (or xvfb-run is
+    available) and installs the missing package automatically via apt-get.
 
-    Silent on macOS (handled natively) and when apt-get is unavailable.
-    The first start may take 30–60 s while the package is downloaded;
+    Silent on macOS (native renderer; no extra packages needed) and when
+    apt-get is unavailable (non-Debian systems).
+
+    The first cold start may take 30–60 s while the package downloads;
     every subsequent start is instant because the package stays installed.
     """
+    global _bootstrap_done
+
+    # Fast path — already done in this process (no lock needed for read)
+    if _bootstrap_done:
+        return
+
     if sys.platform != 'linux':
+        _bootstrap_done = True
         return
 
-    if _lo_works_headless():
-        return  # Already fine — nothing to do
-
-    log.warning(
-        'LibreOffice headless check failed. '
-        'Attempting to install libreoffice-headless automatically…'
-    )
-
-    if _try_apt_install('libreoffice-headless'):
-        if _lo_works_headless():
-            log.info('libreoffice-headless installed successfully.')
+    with _bootstrap_lock:
+        # Re-check inside the lock (double-checked locking)
+        if _bootstrap_done:
             return
-        log.warning('libreoffice-headless installed but check still fails. Trying xvfb…')
 
-    if _try_apt_install('xvfb'):
-        log.info('xvfb installed as fallback display backend.')
-        return
+        try:
+            if _lo_works_headless():
+                return  # Already fine — nothing to do
 
-    log.error(
-        'Could not fix LibreOffice display issue automatically. '
-        'Run manually: sudo apt-get install libreoffice-headless'
-    )
+            log.warning(
+                'LibreOffice headless check failed. '
+                'Attempting to install libreoffice-headless automatically…'
+            )
+
+            if _try_apt_install('libreoffice-headless'):
+                if _lo_works_headless():
+                    log.info('libreoffice-headless installed successfully.')
+                    return
+                log.warning('libreoffice-headless installed but check still fails. Trying xvfb…')
+
+            if _try_apt_install('xvfb'):
+                log.info('xvfb installed as fallback display backend.')
+                return
+
+            log.error(
+                'Could not fix LibreOffice display issue automatically. '
+                'Run manually: sudo apt-get install libreoffice-headless'
+            )
+        finally:
+            # Mark done regardless of outcome so we never re-run in this process
+            _bootstrap_done = True
 
 
 # ---------------------------------------------------------------------------
