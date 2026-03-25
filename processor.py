@@ -25,37 +25,45 @@ from docx.oxml.ns import qn
 
 def _find_libreoffice() -> str:
     """
-    Return the path to the LibreOffice binary, accounting for platform
-    differences.
+    Return the path to the LibreOffice soffice binary.
 
-    macOS: LibreOffice installs as an .app bundle; the binary is not always
-    on PATH unless the user ran 'brew install --cask libreoffice' or created
-    a symlink manually.
+    Priority on macOS (standalone .app build):
+      1. User-library version  – updated automatically by updater.py
+      2. Bundled version       – shipped inside the .app at build time
+      3. System-installed      – /Applications/LibreOffice.app or PATH
 
-    Linux: expects 'libreoffice' on PATH (standard package install).
+    On Linux the function expects 'libreoffice' on PATH.
     """
     import shutil as _shutil
 
     if sys.platform == 'darwin':
+        # 1 + 2: ask the updater (handles both user-library and bundled paths)
+        try:
+            from updater import get_active_soffice
+            path = get_active_soffice()
+            if path and os.path.isfile(path):
+                return path
+        except ImportError:
+            pass  # updater not available (e.g. running tests on Linux)
+
+        # 3: system-installed fallback
         candidates = [
             _shutil.which('libreoffice'),
             _shutil.which('soffice'),
             '/Applications/LibreOffice.app/Contents/MacOS/soffice',
-            # Homebrew cask on Apple Silicon
             '/opt/homebrew/bin/libreoffice',
-            # Homebrew cask on Intel
             '/usr/local/bin/libreoffice',
         ]
         for path in candidates:
             if path and os.path.isfile(path):
                 return path
+
         raise RuntimeError(
-            'LibreOffice niet gevonden. Installeer het via:\n'
-            '  brew install --cask libreoffice\n'
-            'Of download het op https://www.libreoffice.org/download/'
+            'LibreOffice niet gevonden.\n'
+            'Download en installeer het via https://www.libreoffice.org/download/'
         )
 
-    # Linux / andere platformen: verwacht 'libreoffice' op PATH
+    # Linux / other: expect 'libreoffice' on PATH
     binary = _shutil.which('libreoffice') or _shutil.which('soffice')
     if not binary:
         raise RuntimeError(

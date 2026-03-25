@@ -273,3 +273,45 @@ footer {
   font-size: .78rem;
   color: var(--text-muted);
 }
+
+/* ── Update banner ────────────────────────────────────────────────────── */
+.update-banner {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: .82rem;
+  color: var(--text-muted);
+  box-shadow: 0 4px 20px rgba(0,0,0,.4);
+  max-width: 280px;
+  transition: opacity var(--transition);
+}
+
+.update-banner.ready {
+  border-color: var(--success);
+  color: var(--text);
+}
+
+.update-banner.downloading {
+  border-color: var(--accent);
+}
+
+.update-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+.update-banner.downloading .update-icon {
+  display: inline-block;
+  animation: spin .8s linear infinite;
+}
+
+.update-banner.ready .update-icon {
+  color: var(--success);
+}

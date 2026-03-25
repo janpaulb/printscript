@@ -162,3 +162,45 @@ function resetToUpload() {
 }
 
 retryBtn.addEventListener('click', resetToUpload);
+
+// ── LibreOffice update notifications ───────────────────────────────────────
+const updateBanner = document.getElementById('update-banner');
+const updateIcon   = document.getElementById('update-icon');
+const updateMsg    = document.getElementById('update-msg');
+
+function pollUpdateStatus() {
+  fetch('/update-status')
+    .then(r => r.json())
+    .then(data => {
+      switch (data.status) {
+        case 'checking':
+          showUpdate('checking', '↻', 'Controleren op updates\u2026');
+          break;
+        case 'downloading':
+          const pct = data.percent != null ? ` (${data.percent}%)` : '';
+          showUpdate('downloading', '↻', `LibreOffice ${data.version} downloaden${pct}`);
+          break;
+        case 'ready':
+          showUpdate('ready', '✓',
+            `LibreOffice ${data.version} klaar — herstart om bij te werken`);
+          break;
+        default:
+          hideBanner();
+      }
+    })
+    .catch(() => hideBanner());
+}
+
+function showUpdate(cls, icon, msg) {
+  updateBanner.className = `update-banner ${cls}`;
+  updateIcon.textContent = icon;
+  updateMsg.textContent  = msg;
+}
+
+function hideBanner() {
+  updateBanner.classList.add('hidden');
+}
+
+// Poll every 4 seconds while the app is open
+setInterval(pollUpdateStatus, 4000);
+pollUpdateStatus();

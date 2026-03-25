@@ -5,3 +5,10 @@ __pycache__/
 .env
 *.pdf
 *.docx
+
+# PyInstaller build output
+build/
+dist/
+
+# LibreOffice embedded during build (recreated by build_mac.sh)
+bundled_libreoffice/

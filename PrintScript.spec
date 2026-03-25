@@ -14,9 +14,13 @@ a = Analysis(
     pathex=['.'],
     binaries=[],
     datas=[
-        # Bundle the web UI assets
-        ('templates', 'templates'),
-        ('static',    'static'),
+        # Web UI assets
+        ('templates',           'templates'),
+        ('static',              'static'),
+        # LibreOffice – downloaded and staged by build_mac.sh
+        # The whole directory is included; soffice lives at
+        #   {MEIPASS}/LibreOffice/Contents/MacOS/soffice
+        ('bundled_libreoffice', 'LibreOffice'),
     ],
     hiddenimports=[
         # lxml C extensions are not always auto-detected

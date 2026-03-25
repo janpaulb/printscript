@@ -1,84 +1,136 @@
 #!/bin/bash
-# build_mac.sh – Bouw PrintScript.app voor macOS
+# build_mac.sh – Bouw een volledig standalone PrintScript.app voor macOS.
 #
-# Vereisten:
-#   brew install python --cask libreoffice
+# Wat dit script doet:
+#   1. Controleer vereisten (macOS, Python 3, internetverbinding)
+#   2. Installeer Python-dependencies (flask, python-docx, pywebview, pyinstaller, …)
+#   3. Download de nieuwste stabiele LibreOffice voor jouw architectuur
+#   4. Extraheer LibreOffice in bundled_libreoffice/ (tijdelijk, gitgenegeerd)
+#   5. Bouw PrintScript.app via PyInstaller
+#   6. Ruim de tijdelijke bestanden op
 #
 # Gebruik:
 #   chmod +x build_mac.sh
 #   ./build_mac.sh
+#
+# Resultaat: dist/PrintScript.app  (~500–600 MB, volledig standalone)
 
-set -e
+set -euo pipefail
 
-echo "▶  PrintScript Mac-app bouwen"
-echo "──────────────────────────────"
+# ── Kleuren ──────────────────────────────────────────────────────────────────
+GREEN='\033[0;32m'; YELLOW='\033[1;33m'; RED='\033[0;31m'; NC='\033[0m'
+ok()   { echo -e "${GREEN}✓${NC}  $*"; }
+warn() { echo -e "${YELLOW}!${NC}  $*"; }
+err()  { echo -e "${RED}✗${NC}  $*" >&2; exit 1; }
+step() { echo -e "\n▶  $*"; }
 
-# ── Controleer of we op macOS zitten ────────────────────────────────────────
-if [[ "$OSTYPE" != "darwin"* ]]; then
-  echo "❌  Dit script is alleen voor macOS."
-  exit 1
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "   PrintScript – standalone Mac-app bouwen"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+# ── 0. Platformcheck ─────────────────────────────────────────────────────────
+[[ "$OSTYPE" == "darwin"* ]] || err "Dit script is alleen voor macOS."
+
+# ── 1. Python ────────────────────────────────────────────────────────────────
+step "Python controleren"
+PYTHON=$(command -v python3 2>/dev/null) || err "Python 3 niet gevonden. Installeer via: brew install python"
+PY_VERSION=$($PYTHON --version 2>&1)
+ok "$PY_VERSION  →  $PYTHON"
+
+# ── 2. Architectuur ──────────────────────────────────────────────────────────
+step "Architectuur detecteren"
+MACHINE=$(uname -m)
+if [[ "$MACHINE" == "arm64" ]]; then
+  LO_ARCH="aarch64"
+else
+  LO_ARCH="x86_64"
+fi
+ok "Architectuur: $MACHINE  →  LibreOffice-variant: $LO_ARCH"
+
+# ── 3. Python-packages installeren ───────────────────────────────────────────
+step "Python-packages installeren"
+PACKAGES="flask python-docx lxml requests pywebview pyinstaller"
+$PYTHON -m pip install $PACKAGES --quiet --break-system-packages 2>/dev/null \
+  || $PYTHON -m pip install $PACKAGES --quiet
+ok "Packages geïnstalleerd"
+
+# ── 4. Nieuwste LibreOffice-versie ophalen ───────────────────────────────────
+step "Nieuwste LibreOffice-versie opzoeken"
+LO_INDEX="https://download.documentfoundation.org/libreoffice/stable/"
+LO_VERSION=$(curl -s "$LO_INDEX" \
+  | grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?/"' \
+  | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?' \
+  | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n \
+  | tail -1)
+[[ -n "$LO_VERSION" ]] || err "Kon de nieuwste LibreOffice-versie niet ophalen. Controleer je internetverbinding."
+ok "Nieuwste versie: LibreOffice $LO_VERSION"
+
+# ── 5. LibreOffice downloaden ────────────────────────────────────────────────
+DMG_NAME="LibreOffice_${LO_VERSION}_MacOS_${LO_ARCH}.dmg"
+DMG_URL="https://download.documentfoundation.org/libreoffice/stable/${LO_VERSION}/mac/${LO_ARCH}/${DMG_NAME}"
+DMG_PATH="/tmp/${DMG_NAME}"
+
+if [[ -f "$DMG_PATH" ]]; then
+  warn "DMG al aanwezig: $DMG_PATH  (bestaand bestand wordt hergebruikt)"
+else
+  step "LibreOffice downloaden (~300–500 MB)"
+  echo "   URL: $DMG_URL"
+  curl -L --progress-bar -o "$DMG_PATH" "$DMG_URL" \
+    || err "Download mislukt. Controleer je internetverbinding."
+  ok "Download klaar: $DMG_PATH"
 fi
 
-# ── Controleer Python 3 ──────────────────────────────────────────────────────
-if ! command -v python3 &>/dev/null; then
-  echo "❌  Python 3 niet gevonden. Installeer via: brew install python"
-  exit 1
-fi
-PYTHON=$(command -v python3)
-echo "✓  Python: $($PYTHON --version)"
+# ── 6. LibreOffice extracten ─────────────────────────────────────────────────
+step "LibreOffice extracten naar bundled_libreoffice/"
+MOUNT_POINT="/tmp/lo_mount_$$"
+BUNDLE_DIR="$(pwd)/bundled_libreoffice"
 
-# ── Controleer LibreOffice ───────────────────────────────────────────────────
-LO_PATH=""
-for candidate in \
-    "$(command -v libreoffice 2>/dev/null)" \
-    "/Applications/LibreOffice.app/Contents/MacOS/soffice" \
-    "/opt/homebrew/bin/libreoffice" \
-    "/usr/local/bin/libreoffice"; do
-  if [[ -n "$candidate" && -f "$candidate" ]]; then
-    LO_PATH="$candidate"
-    break
-  fi
-done
+# Opruimen van vorige run
+rm -rf "$BUNDLE_DIR"
+mkdir -p "$MOUNT_POINT"
 
-if [[ -z "$LO_PATH" ]]; then
-  echo "❌  LibreOffice niet gevonden."
-  echo "    Installeer via: brew install --cask libreoffice"
-  exit 1
-fi
-echo "✓  LibreOffice: $LO_PATH"
+echo "   DMG mounten…"
+hdiutil attach "$DMG_PATH" -readonly -mountpoint "$MOUNT_POINT" -quiet -nobrowse
 
-# ── Installeer Python-dependencies ──────────────────────────────────────────
-echo ""
-echo "📦  Python-packages installeren..."
-$PYTHON -m pip install \
-  flask \
-  python-docx \
-  lxml \
-  pywebview \
-  pyinstaller \
-  --quiet --break-system-packages 2>/dev/null \
-  || $PYTHON -m pip install flask python-docx lxml pywebview pyinstaller --quiet
+LO_APP="$MOUNT_POINT/LibreOffice.app"
+[[ -d "$LO_APP" ]] || { hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null; err "LibreOffice.app niet gevonden in DMG."; }
 
-echo "✓  Packages geïnstalleerd"
+echo "   Bestanden kopiëren (dit duurt even)…"
+mkdir -p "$BUNDLE_DIR"
+cp -r "$LO_APP/Contents" "$BUNDLE_DIR/Contents"
 
-# ── Verwijder vorige build ───────────────────────────────────────────────────
-echo ""
-echo "🧹  Vorige build opruimen..."
+# Verwijder quarantine-attribuut zodat de binary uitvoerbaar is
+xattr -cr "$BUNDLE_DIR" 2>/dev/null || true
+
+hdiutil detach "$MOUNT_POINT" -quiet
+
+# Versie-markering opslaan (gebruikt door updater.py)
+echo "$LO_VERSION" > "$BUNDLE_DIR/lo_version.txt"
+ok "LibreOffice $LO_VERSION klaar in bundled_libreoffice/"
+
+# ── 7. Vorige build opruimen ─────────────────────────────────────────────────
+step "Vorige build opruimen"
 rm -rf build dist
+ok "Opgeruimd"
 
-# ── Build ────────────────────────────────────────────────────────────────────
-echo ""
-echo "🔨  App bouwen (dit kan 1–3 minuten duren)..."
+# ── 8. PyInstaller ───────────────────────────────────────────────────────────
+step "App bouwen met PyInstaller (1–3 minuten)"
 $PYTHON -m PyInstaller PrintScript.spec --noconfirm
+ok "Build geslaagd"
 
-# ── Klaar ────────────────────────────────────────────────────────────────────
+# ── 9. bundled_libreoffice/ opruimen ─────────────────────────────────────────
+step "Tijdelijke bestanden opruimen"
+rm -rf "$BUNDLE_DIR"
+ok "bundled_libreoffice/ verwijderd"
+
+# ── Klaar ─────────────────────────────────────────────────────────────────────
+APP_SIZE=$(du -sh dist/PrintScript.app 2>/dev/null | cut -f1 || echo "?")
 echo ""
-echo "──────────────────────────────"
-echo "✅  Klaar!"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo -e "${GREEN}✅  Klaar!${NC}"
 echo ""
-echo "   De app staat in:  dist/PrintScript.app"
+echo "   App:    dist/PrintScript.app  (${APP_SIZE})"
 echo ""
-echo "   Installeren:"
-echo "   cp -r dist/PrintScript.app /Applications/"
-echo ""
-echo "   Of dubbelklik op dist/PrintScript.app om hem te testen."
+echo "   Testen:     open dist/PrintScript.app"
+echo "   Installeren: cp -r dist/PrintScript.app /Applications/"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
