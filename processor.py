@@ -280,10 +280,22 @@ def convert_to_pdf(docx_path: str, output_dir: str) -> str:
     profile_dir = os.path.join(output_dir, f'lo_profile_{uuid.uuid4().hex}')
     os.makedirs(profile_dir, exist_ok=True)
 
+    # Build a clean environment for the subprocess.
+    # SAL_USE_VCLPLUGIN=svp forces the headless SVP renderer so LibreOffice
+    # never tries to open an X11/Wayland display — even without --headless.
+    # DISPLAY is removed for the same reason (avoids "no windowing system" crash
+    # on Linux servers). HOME must stay set so LibreOffice can write temp files.
+    env = os.environ.copy()
+    env['SAL_USE_VCLPLUGIN'] = 'svp'
+    env.pop('DISPLAY', None)
+    env.pop('WAYLAND_DISPLAY', None)
+
     result = subprocess.run(
         [
             _find_libreoffice(),
             '--headless',
+            '--norestore',
+            '--nofirststartwizard',
             f'-env:UserInstallation=file://{profile_dir}',
             '--convert-to', 'pdf',
             '--outdir', output_dir,
@@ -292,6 +304,7 @@ def convert_to_pdf(docx_path: str, output_dir: str) -> str:
         capture_output=True,
         text=True,
         timeout=120,
+        env=env,
     )
 
     if result.returncode != 0:
