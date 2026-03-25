@@ -48,23 +48,29 @@ def _try_apt_install(*packages: str) -> bool:
 
 
 def _lo_works_headless() -> bool:
-    """Quick check: can LibreOffice run without a display right now?"""
-    try:
-        lo = shutil.which('libreoffice') or shutil.which('soffice')
-        if not lo:
-            return False
-        env = {**os.environ, 'SAL_USE_VCLPLUGIN': 'svp'}
-        env.pop('DISPLAY', None)
-        env.pop('WAYLAND_DISPLAY', None)
-        r = subprocess.run(
-            [lo, '--headless', '--version'],
-            capture_output=True,
-            timeout=15,
-            env=env,
-        )
-        return r.returncode == 0
-    except Exception:
-        return False
+    """
+    Return True if LibreOffice can actually convert a document without a display.
+
+    We intentionally do NOT run 'libreoffice --version' here: that command
+    skips VCL initialisation entirely and returns 0 even when the headless
+    plugin is missing — giving a false-positive that tricks bootstrap into
+    thinking everything is fine.
+
+    Instead we check directly whether the svp VCL plugin library exists on
+    disk (installed by the libreoffice-headless package) or whether xvfb-run
+    is available as a fallback display server.
+    """
+    if sys.platform != 'linux':
+        return True  # macOS uses its native renderer; no special setup needed
+
+    import glob as _glob
+
+    # libreoffice-headless installs the svp plugin, e.g. libvclplug_svplo.so
+    if _glob.glob('/usr/lib/libreoffice/program/libvclplug_svp*.so'):
+        return True
+
+    # xvfb-run provides a virtual X11 display as a fallback
+    return bool(shutil.which('xvfb-run'))
 
 
 def bootstrap_headless_libreoffice() -> None:
