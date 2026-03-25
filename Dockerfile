@@ -9,16 +9,43 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ── Stage 2: Runtime image ─────────────────────────────────────────────────────
 FROM python:3.11-slim
 
-# libreoffice-writer    – the Writer application
-# libreoffice-headless  – the svp/headless VCL renderer (no display needed)
-# fonts-liberation      – metric-compatible Arial/Times/Courier replacements
-#                         (prevents text reflow vs. the original Word document)
+# Install LibreOffice and immediately strip everything that is only needed
+# for an interactive GUI session. This keeps the image as small as possible.
+#
+# All cleanup happens in a single RUN so Docker commits one thin layer,
+# not the bloated intermediate state before cleanup.
+#
+# What we keep:
+#   libreoffice-writer    – Writer application + OOXML filters
+#   libreoffice-headless  – svp VCL renderer (no display needed)
+#   fonts-liberation      – metric-compatible Arial/Times/Courier clones
+#                           (prevents text reflow vs. the original .docx)
+#
+# What we remove (~180–220 MB):
+#   images_*.zip          – icon themes (6–8 zips × ~15–25 MB each)
+#   gallery/              – clipart library (~50 MB)
+#   template/             – document templates
+#   autocorr/             – autocorrect dictionaries
+#   extensions/           – optional LO extensions
+#   basic/ wizards/       – Basic IDE and wizard scripts
+#   program/classes/      – Java .jar files (Java not needed for conversion)
+#   /usr/share/doc/lo*    – upstream documentation
 RUN apt-get update \
- && apt-get install -y --no-install-recommends \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         libreoffice-writer \
         libreoffice-headless \
         fonts-liberation \
- && rm -rf /var/lib/apt/lists/*
+ && find /usr/lib/libreoffice/share/config -name 'images_*.zip' -delete \
+ && rm -rf \
+        /usr/lib/libreoffice/share/gallery \
+        /usr/lib/libreoffice/share/template \
+        /usr/lib/libreoffice/share/autocorr \
+        /usr/lib/libreoffice/share/extensions \
+        /usr/lib/libreoffice/share/basic \
+        /usr/lib/libreoffice/share/wizards \
+        /usr/lib/libreoffice/program/classes \
+        /usr/share/doc/libreoffice* \
+        /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -39,7 +66,7 @@ USER printscript
 
 EXPOSE 5000
 
-# Verify LibreOffice works at build time so broken images are caught early
+# Verify LibreOffice works at build time so a broken image is caught before deploy
 RUN SAL_USE_VCLPLUGIN=svp libreoffice --headless --version
 
 CMD ["python", "app.py"]

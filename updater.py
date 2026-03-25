@@ -197,6 +197,47 @@ def _notify(callback, payload: dict) -> None:
             pass
 
 
+def _strip_lo_bundle(root: Path) -> None:
+    """
+    Remove GUI-only assets from a LibreOffice bundle directory.
+
+    These files are never used during headless PDF conversion and together
+    account for ~180–230 MB of the LibreOffice install:
+      • images_*.zip  – icon themes
+      • gallery/      – clipart (~50 MB)
+      • template/     – document templates
+      • autocorr/     – autocorrect dictionaries
+      • extensions/   – optional LO extensions
+      • basic/        – Basic IDE
+      • wizards/      – wizard scripts
+      • classes/      – Java .jar files (Java not required for conversion)
+    """
+    # Icon theme zips
+    for p in root.rglob('images_*.zip'):
+        try:
+            p.unlink()
+        except Exception:
+            pass
+
+    # Named directories
+    for name in ('gallery', 'template', 'autocorr', 'extensions',
+                 'basic', 'wizards'):
+        for p in root.rglob(name):
+            if p.is_dir():
+                try:
+                    shutil.rmtree(p)
+                except Exception:
+                    pass
+
+    # Java class directories
+    for p in root.rglob('classes'):
+        if p.is_dir() and 'java' in str(p).lower():
+            try:
+                shutil.rmtree(p)
+            except Exception:
+                pass
+
+
 def _download_and_stage(url: str, version: str, progress_cb) -> None:
     """Download the DMG, mount it, copy LibreOffice.app/Contents to STAGED_DIR."""
     import uuid as _uuid
@@ -253,6 +294,9 @@ def _download_and_stage(url: str, version: str, progress_cb) -> None:
                 ['cp', '-r', str(lo_app / 'Contents'), str(STAGED_DIR / 'Contents')],
                 check=True,
             )
+
+            # ── Strip GUI-only assets to keep the update small ─────────────
+            _strip_lo_bundle(STAGED_DIR)
 
             # Remove macOS quarantine so the binary can be executed
             subprocess.run(['xattr', '-cr', str(STAGED_DIR)], check=False)

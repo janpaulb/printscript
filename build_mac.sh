@@ -99,10 +99,33 @@ echo "   Bestanden kopiëren (dit duurt even)…"
 mkdir -p "$BUNDLE_DIR"
 cp -r "$LO_APP/Contents" "$BUNDLE_DIR/Contents"
 
+hdiutil detach "$MOUNT_POINT" -quiet
+
+# ── LibreOffice-bundle verkleinen ─────────────────────────────────────────────
+# Verwijder alles wat alleen nodig is voor een interactieve GUI-sessie.
+# Dit scheelt doorgaans 180–230 MB in de uiteindelijke .app.
+#
+# Wat we verwijderen:
+#   images_*.zip  – icoonthema's (6–8 zips × ~15–25 MB elk)
+#   gallery/      – gallerij met clipart (~50 MB)
+#   template/     – documentsjablonen
+#   autocorr/     – autocorrectie-woordenboeken
+#   extensions/   – optionele LibreOffice-extensies
+#   basic/        – Basic-IDE
+#   wizards/      – wizard-scripts
+#   java/classes  – Java .jar bestanden (Java niet nodig voor conversie)
+echo "   Onnodige LibreOffice-onderdelen verwijderen…"
+find "$BUNDLE_DIR" -name 'images_*.zip' -delete 2>/dev/null || true
+for _dir in gallery template autocorr extensions basic wizards; do
+  find "$BUNDLE_DIR" -type d -name "$_dir" -exec rm -rf {} + 2>/dev/null || true
+done
+find "$BUNDLE_DIR" -type d -name 'classes' -path '*/java/*' -exec rm -rf {} + 2>/dev/null || true
+
+STRIPPED_SIZE=$(du -sh "$BUNDLE_DIR" 2>/dev/null | cut -f1 || echo "?")
+ok "LibreOffice gestript: ${STRIPPED_SIZE}"
+
 # Verwijder quarantine-attribuut zodat de binary uitvoerbaar is
 xattr -cr "$BUNDLE_DIR" 2>/dev/null || true
-
-hdiutil detach "$MOUNT_POINT" -quiet
 
 # Versie-markering opslaan (gebruikt door updater.py)
 echo "$LO_VERSION" > "$BUNDLE_DIR/lo_version.txt"
