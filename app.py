@@ -3,20 +3,15 @@ PrintScript – Word to print-ready PDF converter.
 Flask web application entry point.
 """
 
+import io
 import os
+import re
 import shutil
 import tempfile
 import uuid
 from pathlib import Path
 
-from flask import (
-    Flask,
-    after_this_request,
-    jsonify,
-    render_template,
-    request,
-    send_file,
-)
+from flask import Flask, jsonify, render_template, request, send_file
 
 from processor import process
 from gdocs import download_as_docx, extract_doc_id
@@ -26,21 +21,33 @@ app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB upload limit
 
 ALLOWED_EXTENSIONS = {'.docx'}
 
+# Only allow safe filename characters in the download name
+_SAFE_STEM_RE = re.compile(r'[^\w\- ]')
+
+
+def _safe_stem(raw: str) -> str:
+    """Sanitize a filename stem to safe ASCII characters."""
+    stem = Path(raw).stem
+    stem = _SAFE_STEM_RE.sub('_', stem).strip('_ ')
+    return stem or 'document'
+
 
 def _allowed(filename: str) -> bool:
     return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
 
 
-def _stream_pdf(tmpdir: str, pdf_path: str, download_name: str):
-    """Register cleanup and return the PDF as a download response."""
+def _pdf_response(pdf_path: str, download_name: str):
+    """
+    Read the PDF into memory and return it as a download response.
 
-    @after_this_request
-    def cleanup(response):
-        shutil.rmtree(tmpdir, ignore_errors=True)
-        return response
-
+    Reading into memory before returning ensures the temp directory can be
+    cleaned up immediately without a race condition against Flask's file
+    streaming.
+    """
+    with open(pdf_path, 'rb') as fh:
+        data = fh.read()
     return send_file(
-        pdf_path,
+        io.BytesIO(data),
         mimetype='application/pdf',
         as_attachment=True,
         download_name=download_name,
@@ -69,20 +76,22 @@ def convert():
     if not _allowed(file.filename):
         return jsonify(error='Alleen .docx bestanden zijn toegestaan.'), 400
 
+    stem = _safe_stem(file.filename)
     tmpdir = tempfile.mkdtemp()
     try:
-        stem = Path(file.filename).stem
         input_path = os.path.join(tmpdir, f'{uuid.uuid4().hex}.docx')
         output_path = os.path.join(tmpdir, f'{stem}_printscript.pdf')
 
         file.save(input_path)
         process(input_path, output_path)
 
-        return _stream_pdf(tmpdir, output_path, f'{stem}_printscript.pdf')
-
+        response = _pdf_response(output_path, f'{stem}_printscript.pdf')
     except Exception as exc:
-        shutil.rmtree(tmpdir, ignore_errors=True)
         return jsonify(error=f'Conversie mislukt: {exc}'), 500
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    return response
 
 
 @app.route('/convert-url', methods=['POST'])
@@ -94,7 +103,6 @@ def convert_url():
     if not url:
         return jsonify(error='Geen URL opgegeven.'), 400
 
-    # Validate it looks like a Google Docs link before hitting the network
     try:
         doc_id = extract_doc_id(url)
     except ValueError as exc:
@@ -105,25 +113,21 @@ def convert_url():
         input_path = os.path.join(tmpdir, f'{doc_id}.docx')
         output_path = os.path.join(tmpdir, f'{doc_id}_printscript.pdf')
 
-        # Optional token forwarded from the browser (future OAuth flow)
         token = body.get('access_token') or None
-
-        try:
-            download_as_docx(url, input_path, access_token=token)
-        except PermissionError as exc:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-            return jsonify(error=str(exc)), 403
-        except (ValueError, RuntimeError) as exc:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-            return jsonify(error=str(exc)), 400
-
+        download_as_docx(url, input_path, access_token=token)
         process(input_path, output_path)
 
-        return _stream_pdf(tmpdir, output_path, f'printscript_{doc_id[:8]}.pdf')
-
+        response = _pdf_response(output_path, f'printscript_{doc_id[:8]}.pdf')
+    except PermissionError as exc:
+        return jsonify(error=str(exc)), 403
+    except (ValueError, RuntimeError) as exc:
+        return jsonify(error=str(exc)), 400
     except Exception as exc:
-        shutil.rmtree(tmpdir, ignore_errors=True)
         return jsonify(error=f'Conversie mislukt: {exc}'), 500
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    return response
 
 
 if __name__ == '__main__':
