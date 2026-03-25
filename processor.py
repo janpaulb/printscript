@@ -368,7 +368,7 @@ def _lo_cmd(binary: str, profile_dir: str, output_dir: str, docx_path: str) -> l
 
 
 def _is_display_error(stderr: str) -> bool:
-    markers = ('windowing system', 'cannot connect to x', 'no display', 'headless')
+    markers = ('windowing system', 'cannot connect to x', 'no display')
     low = stderr.lower()
     return any(m in low for m in markers)
 
@@ -446,7 +446,13 @@ def process(input_docx_path: str, output_pdf_path: str) -> None:
     Full pipeline: load → clean → save cleaned docx → convert to PDF.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
-        doc = Document(input_docx_path)
+        try:
+            doc = Document(input_docx_path)
+        except Exception as exc:
+            raise RuntimeError(
+                'Kan het Word-document niet openen. '
+                'Controleer of het bestand niet beschadigd of versleuteld is.'
+            ) from exc
 
         remove_comments(doc)
         remove_highlighting(doc)

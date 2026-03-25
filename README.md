@@ -83,8 +83,11 @@ cd printscript
 # 2. Installeer Python-packages
 pip install -r requirements.txt
 
-# 3. Start de webserver
+# 3a. Ontwikkeling / lokaal
 python app.py
+
+# 3b. Productie (aanbevolen — gunicorn zit al in requirements.txt)
+gunicorn --config gunicorn.conf.py app:app
 ```
 
 > **Fout "no suitable windowing system found"?**
@@ -126,7 +129,7 @@ open dist/PrintScript_arm64.dmg   # Apple Silicon
 open dist/PrintScript_x86_64.dmg  # Intel
 ```
 
-**Appgrootte:** ±500–600 MB (LibreOffice is groot).
+**Appgrootte:** ±320 MB (LibreOffice is gestript van GUI-onderdelen).
 
 ### Automatisch bouwen via GitHub Actions
 

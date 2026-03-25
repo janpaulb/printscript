@@ -43,13 +43,15 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
-        # Not needed at runtime
+        # Not needed at runtime in the macOS app
         'tkinter',
         'matplotlib',
         'numpy',
         'pandas',
         'PIL',
         'pytest',
+        # Server-only — not used in the native macOS app
+        'gunicorn',
     ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,

@@ -35,7 +35,7 @@ RUN apt-get update \
         libreoffice-writer \
         libreoffice-headless \
         fonts-liberation \
- && find /usr/lib/libreoffice/share/config -name 'images_*.zip' -delete \
+ && find /usr/lib/libreoffice/share/config -name 'images_*.zip' -delete 2>/dev/null || true \
  && rm -rf \
         /usr/lib/libreoffice/share/gallery \
         /usr/lib/libreoffice/share/template \
@@ -69,4 +69,7 @@ EXPOSE 5000
 # Verify LibreOffice works at build time so a broken image is caught before deploy
 RUN SAL_USE_VCLPLUGIN=svp libreoffice --headless --version
 
-CMD ["python", "app.py"]
+# gunicorn handles graceful shutdown, worker recycling and multi-core use.
+# bootstrap_headless_libreoffice() is called per-worker via gunicorn.conf.py post_fork.
+COPY gunicorn.conf.py .
+CMD ["gunicorn", "--config", "gunicorn.conf.py", "app:app"]
