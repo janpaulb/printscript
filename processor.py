@@ -9,13 +9,60 @@ Transforms a .docx file into a print-ready PDF by:
 """
 
 import os
-import subprocess
 import shutil
+import subprocess
+import sys
 import tempfile
 import uuid
 
 from docx import Document
 from docx.oxml.ns import qn
+
+
+# ---------------------------------------------------------------------------
+# LibreOffice binary detection
+# ---------------------------------------------------------------------------
+
+def _find_libreoffice() -> str:
+    """
+    Return the path to the LibreOffice binary, accounting for platform
+    differences.
+
+    macOS: LibreOffice installs as an .app bundle; the binary is not always
+    on PATH unless the user ran 'brew install --cask libreoffice' or created
+    a symlink manually.
+
+    Linux: expects 'libreoffice' on PATH (standard package install).
+    """
+    import shutil as _shutil
+
+    if sys.platform == 'darwin':
+        candidates = [
+            _shutil.which('libreoffice'),
+            _shutil.which('soffice'),
+            '/Applications/LibreOffice.app/Contents/MacOS/soffice',
+            # Homebrew cask on Apple Silicon
+            '/opt/homebrew/bin/libreoffice',
+            # Homebrew cask on Intel
+            '/usr/local/bin/libreoffice',
+        ]
+        for path in candidates:
+            if path and os.path.isfile(path):
+                return path
+        raise RuntimeError(
+            'LibreOffice niet gevonden. Installeer het via:\n'
+            '  brew install --cask libreoffice\n'
+            'Of download het op https://www.libreoffice.org/download/'
+        )
+
+    # Linux / andere platformen: verwacht 'libreoffice' op PATH
+    binary = _shutil.which('libreoffice') or _shutil.which('soffice')
+    if not binary:
+        raise RuntimeError(
+            'LibreOffice niet gevonden. Installeer het via:\n'
+            '  sudo apt-get install libreoffice-writer'
+        )
+    return binary
 
 
 # ---------------------------------------------------------------------------
@@ -214,7 +261,7 @@ def convert_to_pdf(docx_path: str, output_dir: str) -> str:
 
     result = subprocess.run(
         [
-            'libreoffice',
+            _find_libreoffice(),
             '--headless',
             f'-env:UserInstallation=file://{profile_dir}',
             '--convert-to', 'pdf',
