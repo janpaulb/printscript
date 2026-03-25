@@ -23,6 +23,9 @@ from docx.oxml.ns import qn
 # LibreOffice binary detection
 # ---------------------------------------------------------------------------
 
+_LIBREOFFICE_BINARY: str | None = None  # module-level cache
+
+
 def _find_libreoffice() -> str:
     """
     Return the path to the LibreOffice soffice binary.
@@ -33,7 +36,14 @@ def _find_libreoffice() -> str:
       3. System-installed      – /Applications/LibreOffice.app or PATH
 
     On Linux the function expects 'libreoffice' on PATH.
+
+    The result is cached at module level so repeated conversions skip
+    the filesystem probing overhead.
     """
+    global _LIBREOFFICE_BINARY
+    if _LIBREOFFICE_BINARY and os.path.isfile(_LIBREOFFICE_BINARY):
+        return _LIBREOFFICE_BINARY
+
     import shutil as _shutil
 
     if sys.platform == 'darwin':
@@ -42,6 +52,7 @@ def _find_libreoffice() -> str:
             from updater import get_active_soffice
             path = get_active_soffice()
             if path and os.path.isfile(path):
+                _LIBREOFFICE_BINARY = path
                 return path
         except ImportError:
             pass  # updater not available (e.g. running tests on Linux)
@@ -56,6 +67,7 @@ def _find_libreoffice() -> str:
         ]
         for path in candidates:
             if path and os.path.isfile(path):
+                _LIBREOFFICE_BINARY = path
                 return path
 
         raise RuntimeError(
@@ -70,6 +82,7 @@ def _find_libreoffice() -> str:
             'LibreOffice niet gevonden. Installeer het via:\n'
             '  sudo apt-get install libreoffice-writer'
         )
+    _LIBREOFFICE_BINARY = binary
     return binary
 
 

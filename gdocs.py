@@ -122,7 +122,7 @@ def _get_export(doc_id: str, headers: dict, confirm: bool = False) -> requests.R
         return requests.get(
             export_url,
             headers=headers,
-            timeout=60,
+            timeout=(10, 300),   # (connect timeout, read timeout in seconds)
             allow_redirects=True,
             stream=True,
         )

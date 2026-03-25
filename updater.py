@@ -214,18 +214,22 @@ def _download_and_stage(url: str, version: str, progress_cb) -> None:
         # ── Download ────────────────────────────────────────────────────────
         r = requests.get(url, stream=True, timeout=600)
         r.raise_for_status()
-        total = int(r.headers.get('content-length', 0))
-        done  = 0
+        total    = int(r.headers.get('content-length', 0))
+        done     = 0
+        last_pct = -1
         with open(dmg, 'wb') as fh:
             for chunk in r.iter_content(65536):
                 fh.write(chunk)
                 done += len(chunk)
                 if total:
-                    _notify(progress_cb, {
-                        'status':  'downloading',
-                        'percent': round(done / total * 100),
-                        'version': version,
-                    })
+                    pct = round(done / total * 100)
+                    if pct != last_pct:          # throttle: at most one msg per %
+                        last_pct = pct
+                        _notify(progress_cb, {
+                            'status':  'downloading',
+                            'percent': pct,
+                            'version': version,
+                        })
 
         # ── Mount DMG ───────────────────────────────────────────────────────
         _notify(progress_cb, {'status': 'extracting', 'version': version})

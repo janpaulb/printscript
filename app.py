@@ -13,6 +13,7 @@ import uuid
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request, send_file
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from processor import process
 from gdocs import download_as_docx, extract_doc_id
@@ -34,6 +35,11 @@ app = Flask(
 app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB upload limit
 
 ALLOWED_EXTENSIONS = {'.docx'}
+
+
+@app.errorhandler(RequestEntityTooLarge)
+def handle_too_large(_e):
+    return jsonify(error='Bestand is te groot (maximaal 50 MB).'), 413
 
 # Only allow safe filename characters in the download name
 _SAFE_STEM_RE = re.compile(r'[^\w\- ]')
