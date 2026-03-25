@@ -66,10 +66,27 @@ USER printscript
 
 EXPOSE 5000
 
-# Verify LibreOffice works at build time so a broken image is caught before deploy
-RUN SAL_USE_VCLPLUGIN=svp libreoffice --headless --version
+# Verify LibreOffice headless works at build time by doing a real conversion
+# (not --version, which skips VCL init and always returns 0 even when broken).
+RUN python3 -c "
+import subprocess, tempfile, os, sys
+with tempfile.NamedTemporaryFile(suffix='.txt', delete=False, mode='w') as f:
+    f.write('build test')
+    src = f.name
+env = {**os.environ, 'SAL_USE_VCLPLUGIN': 'svp'}
+env.pop('DISPLAY', None); env.pop('WAYLAND_DISPLAY', None)
+r = subprocess.run(
+    ['libreoffice','--headless','--norestore','--nofirststartwizard',
+     '--convert-to','pdf','--outdir','/tmp', src],
+    capture_output=True, text=True, timeout=60, env=env)
+if r.returncode != 0:
+    print('STDOUT:', r.stdout, file=sys.stderr)
+    print('STDERR:', r.stderr, file=sys.stderr)
+    sys.exit(1)
+print('LibreOffice headless VCL test: OK')
+"
 
 # gunicorn handles graceful shutdown, worker recycling and multi-core use.
-# bootstrap_headless_libreoffice() is called per-worker via gunicorn.conf.py post_fork.
+# bootstrap_headless_libreoffice() is called once in the master process via on_starting.
 COPY gunicorn.conf.py .
 CMD ["gunicorn", "--config", "gunicorn.conf.py", "app:app"]

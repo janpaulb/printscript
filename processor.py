@@ -34,20 +34,42 @@ _bootstrap_done = False
 def _try_apt_install(*packages: str) -> bool:
     """
     Attempt to install one or more Debian/Ubuntu packages via apt-get.
+    Runs 'apt-get update' first so the package can be found even in fresh
+    containers where the apt cache has never been populated.
     Returns True if the install command succeeded.
-    Silent on errors so it never crashes the caller.
+    Logs failures but never raises so callers stay unaffected.
     """
     if sys.platform != 'linux' or not shutil.which('apt-get'):
         return False
+    apt_env = {**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}
     try:
+        # Refresh index first — a cold apt cache causes "Unable to locate package"
+        subprocess.run(
+            ['apt-get', 'update', '-q'],
+            capture_output=True, timeout=120, env=apt_env,
+        )
         r = subprocess.run(
             ['apt-get', 'install', '-y', '--no-install-recommends', *packages],
             capture_output=True,
             timeout=180,
-            env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'},
+            env=apt_env,
         )
+        if r.returncode != 0:
+            log.warning(
+                'apt-get install %s failed (rc=%d): %s',
+                ' '.join(packages), r.returncode,
+                r.stderr.decode(errors='replace') if isinstance(r.stderr, bytes) else r.stderr,
+            )
         return r.returncode == 0
-    except Exception:
+    except PermissionError:
+        log.warning(
+            'apt-get install %s skipped: no root privileges. '
+            'Run manually: sudo apt-get install %s',
+            ' '.join(packages), ' '.join(packages),
+        )
+        return False
+    except Exception as exc:
+        log.warning('apt-get install %s failed: %s', ' '.join(packages), exc)
         return False
 
 
@@ -464,12 +486,18 @@ def convert_to_pdf(docx_path: str, output_dir: str) -> str:
             )
 
     if result.returncode != 0:
+        # Always log the raw LibreOffice output so server admins can diagnose
+        log.error(
+            'LibreOffice conversion failed (rc=%d)\nSTDOUT: %s\nSTDERR: %s',
+            result.returncode, result.stdout.strip(), result.stderr.strip(),
+        )
         if _is_display_error(result.stderr):
             raise RuntimeError(
                 'LibreOffice kan geen display vinden.\n'
                 'Installeer één van de volgende pakketten en start opnieuw:\n'
                 '  sudo apt-get install libreoffice-headless\n'
-                '  of: sudo apt-get install xvfb'
+                '  of: sudo apt-get install xvfb\n\n'
+                f'LibreOffice foutmelding:\n{result.stderr.strip()}'
             )
         raise RuntimeError(
             f'PDF-conversie mislukt (LibreOffice rc={result.returncode}):\n'
