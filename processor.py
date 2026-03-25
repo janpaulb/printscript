@@ -8,6 +8,7 @@ Transforms a .docx file into a print-ready PDF by:
   4. Keeping page-number footer intact
 """
 
+import logging
 import os
 import shutil
 import subprocess
@@ -17,6 +18,93 @@ import uuid
 
 from docx import Document
 from docx.oxml.ns import qn
+
+
+# ---------------------------------------------------------------------------
+# Headless bootstrap — auto-install missing system packages on Linux
+# ---------------------------------------------------------------------------
+
+log = logging.getLogger(__name__)
+
+
+def _try_apt_install(*packages: str) -> bool:
+    """
+    Attempt to install one or more Debian/Ubuntu packages via apt-get.
+    Returns True if the install command succeeded.
+    Silent on errors so it never crashes the caller.
+    """
+    if sys.platform != 'linux' or not shutil.which('apt-get'):
+        return False
+    try:
+        r = subprocess.run(
+            ['apt-get', 'install', '-y', '--no-install-recommends', *packages],
+            capture_output=True,
+            timeout=180,
+            env={**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'},
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def _lo_works_headless() -> bool:
+    """Quick check: can LibreOffice run without a display right now?"""
+    try:
+        lo = shutil.which('libreoffice') or shutil.which('soffice')
+        if not lo:
+            return False
+        env = {**os.environ, 'SAL_USE_VCLPLUGIN': 'svp'}
+        env.pop('DISPLAY', None)
+        env.pop('WAYLAND_DISPLAY', None)
+        r = subprocess.run(
+            [lo, '--headless', '--version'],
+            capture_output=True,
+            timeout=15,
+            env=env,
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
+def bootstrap_headless_libreoffice() -> None:
+    """
+    Called once at app startup (from app.py __main__).
+
+    On Linux: verifies that LibreOffice can run without a display.
+    If it cannot, automatically installs the missing packages:
+      1. libreoffice-headless  (svp VCL renderer — preferred)
+      2. xvfb                  (virtual X11 framebuffer — fallback)
+
+    Silent on macOS (handled natively) and when apt-get is unavailable.
+    The first start may take 30–60 s while the package is downloaded;
+    every subsequent start is instant because the package stays installed.
+    """
+    if sys.platform != 'linux':
+        return
+
+    if _lo_works_headless():
+        return  # Already fine — nothing to do
+
+    log.warning(
+        'LibreOffice headless check failed. '
+        'Attempting to install libreoffice-headless automatically…'
+    )
+
+    if _try_apt_install('libreoffice-headless'):
+        if _lo_works_headless():
+            log.info('libreoffice-headless installed successfully.')
+            return
+        log.warning('libreoffice-headless installed but check still fails. Trying xvfb…')
+
+    if _try_apt_install('xvfb'):
+        log.info('xvfb installed as fallback display backend.')
+        return
+
+    log.error(
+        'Could not fix LibreOffice display issue automatically. '
+        'Run manually: sudo apt-get install libreoffice-headless'
+    )
 
 
 # ---------------------------------------------------------------------------

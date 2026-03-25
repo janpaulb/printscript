@@ -187,5 +187,13 @@ def update_status():
 
 
 if __name__ == '__main__':
+    import logging
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+
+    # Ensure LibreOffice can run headlessly before accepting requests.
+    # On Linux this auto-installs libreoffice-headless or xvfb if needed.
+    from processor import bootstrap_headless_libreoffice
+    bootstrap_headless_libreoffice()
+
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
