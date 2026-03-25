@@ -39,28 +39,41 @@ Converteer Word-documenten (.docx) naar drukklare PDF's — via de browser of al
 
 ## Snel starten (webserver)
 
-### Vereisten
-
-- Python 3.11 of hoger
-- LibreOffice (inclusief de headless backend)
+### Optie A — Docker (aanbevolen, werkt altijd)
 
 ```bash
-# Debian / Ubuntu (server / VPS — zonder GUI)
-sudo apt-get install libreoffice-writer libreoffice-headless
+# Clone & start in één commando
+git clone https://github.com/janpaulb/printscript.git
+cd printscript
+docker compose up
+```
 
-# Debian / Ubuntu (als bovenstaande niet werkt: virtueel X11-scherm)
-sudo apt-get install xvfb
+Of gebruik de kant-en-klare image van GitHub Container Registry:
+
+```bash
+docker run -p 5000:5000 ghcr.io/janpaulb/printscript:latest
+```
+
+Open je browser op [http://localhost:5000](http://localhost:5000).
+
+De Docker-image bevat LibreOffice + de headless-renderer — het werkt direct, geen extra pakketten nodig.
+
+---
+
+### Optie B — Lokaal zonder Docker
+
+**Vereisten**
+
+- Python 3.11 of hoger
+- LibreOffice inclusief de headless-renderer
+
+```bash
+# Debian / Ubuntu
+sudo apt-get install libreoffice-writer libreoffice-headless
 
 # macOS (Homebrew)
 brew install --cask libreoffice
 ```
-
-> **Fout "no suitable windowing system found"?**
-> LibreOffice mist de headless-renderer. Voer het volgende uit:
-> `sudo apt-get install libreoffice-headless`
-> Als dat niet helpt: `sudo apt-get install xvfb` — PrintScript valt daar automatisch op terug.
-
-### Installeren en draaien
 
 ```bash
 # 1. Clone de repository
@@ -74,7 +87,8 @@ pip install -r requirements.txt
 python app.py
 ```
 
-Open je browser op [http://localhost:5000](http://localhost:5000).
+> **Fout "no suitable windowing system found"?**
+> `sudo apt-get install libreoffice-headless` — of gebruik gewoon Docker (Optie A).
 
 Sleep een `.docx`-bestand op de uploadzone of plak een Google Docs-URL. De PDF wordt automatisch gedownload.
 

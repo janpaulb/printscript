@@ -1,0 +1,9 @@
+services:
+  printscript:
+    build: .
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+    # Optional: mount a volume for persistent LibreOffice temp files
+    # tmpfs:
+    #   - /tmp:size=256m
