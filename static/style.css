@@ -1,0 +1,217 @@
+/* ── Reset & base ─────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg:          #0f1117;
+  --surface:     #1a1d27;
+  --surface-2:   #222636;
+  --border:      #2e3248;
+  --accent:      #6c63ff;
+  --accent-hover:#5a52e0;
+  --text:        #e8eaf6;
+  --text-muted:  #8b90b0;
+  --success:     #4caf87;
+  --error:       #e05c6c;
+  --radius:      12px;
+  --transition:  .2s ease;
+}
+
+body {
+  font-family: 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+/* ── Page wrapper ─────────────────────────────────────────────────────── */
+.page {
+  width: 100%;
+  max-width: 600px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+/* ── Header ───────────────────────────────────────────────────────────── */
+header { text-align: center; }
+
+.logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.75rem;
+  font-weight: 700;
+  letter-spacing: -.5px;
+}
+
+.logo-icon {
+  background: var(--accent);
+  color: #fff;
+  width: 40px; height: 40px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: 1rem;
+}
+
+.tagline {
+  margin-top: 8px;
+  color: var(--text-muted);
+  font-size: .95rem;
+}
+
+/* ── Cards ────────────────────────────────────────────────────────────── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.hidden { display: none !important; }
+
+/* ── Drop zone ────────────────────────────────────────────────────────── */
+.drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 40px 24px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  outline: none;
+}
+
+.drop-zone:hover,
+.drop-zone:focus,
+.drop-zone.drag-over {
+  border-color: var(--accent);
+  background: rgba(108, 99, 255, .06);
+}
+
+.drop-icon { font-size: 2.5rem; line-height: 1; }
+
+.drop-primary { font-size: 1rem; }
+
+.drop-secondary { color: var(--text-muted); font-size: .85rem; }
+
+.drop-hint {
+  margin-top: 4px;
+  font-size: .8rem;
+  color: var(--text-muted);
+  min-height: 1.2em;
+}
+
+#file-input { display: none; }
+
+/* ── Checklist ────────────────────────────────────────────────────────── */
+.checklist h3 {
+  font-size: .8rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--text-muted);
+  margin-bottom: 12px;
+}
+
+.checklist ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.checklist li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: .9rem;
+  line-height: 1.4;
+}
+
+.check {
+  color: var(--success);
+  font-size: 1rem;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────── */
+.btn {
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: .95rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: background var(--transition), opacity var(--transition);
+  align-self: stretch;
+  text-align: center;
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+.btn-primary:disabled {
+  opacity: .4;
+  cursor: not-allowed;
+}
+
+.btn-outline {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Progress ─────────────────────────────────────────────────────────── */
+#progress-card {
+  align-items: center;
+  padding: 48px 32px;
+  gap: 20px;
+}
+
+.spinner {
+  width: 48px; height: 48px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.status-text { color: var(--text-muted); font-size: .95rem; }
+
+/* ── Error ────────────────────────────────────────────────────────────── */
+#error-card { align-items: center; padding: 40px 32px; }
+
+.error-icon { font-size: 2.5rem; }
+
+.error-text {
+  color: var(--error);
+  text-align: center;
+  font-size: .95rem;
+  line-height: 1.5;
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────── */
+footer {
+  text-align: center;
+  font-size: .78rem;
+  color: var(--text-muted);
+}

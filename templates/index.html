@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="nl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PrintScript – Word naar PDF</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="page">
+
+    <header>
+      <div class="logo">
+        <span class="logo-icon">&#9654;</span>
+        <span class="logo-text">PrintScript</span>
+      </div>
+      <p class="tagline">Van Word-document naar print-ready script</p>
+    </header>
+
+    <main>
+      <!-- Upload card -->
+      <div class="card" id="upload-card">
+        <div
+          class="drop-zone"
+          id="drop-zone"
+          role="button"
+          tabindex="0"
+          aria-label="Sleep je .docx bestand hierheen of klik om te bladeren"
+        >
+          <div class="drop-icon">&#128196;</div>
+          <p class="drop-primary">Sleep je <strong>.docx</strong> bestand hierheen</p>
+          <p class="drop-secondary">of</p>
+          <label class="btn btn-outline" for="file-input">Bladeren</label>
+          <input
+            type="file"
+            id="file-input"
+            accept=".docx"
+            aria-label="Selecteer een Word-document"
+          />
+          <p class="drop-hint" id="file-name-display">Geen bestand geselecteerd</p>
+        </div>
+
+        <div class="checklist">
+          <h3>Wat wordt gedaan bij de conversie</h3>
+          <ul>
+            <li>
+              <span class="check">&#10003;</span>
+              Alle <strong>commentaren</strong> worden verwijderd
+            </li>
+            <li>
+              <span class="check">&#10003;</span>
+              Alle <strong>arceringen</strong> worden verwijderd (tekstkleur blijft behouden)
+            </li>
+            <li>
+              <span class="check">&#10003;</span>
+              Alle <strong>afbeeldingen na pagina 1</strong> worden verwijderd
+            </li>
+            <li>
+              <span class="check">&#10003;</span>
+              <strong>Paginanummering</strong> in de footer blijft staan
+            </li>
+          </ul>
+        </div>
+
+        <button class="btn btn-primary" id="convert-btn" disabled>
+          Genereer PDF
+        </button>
+      </div>
+
+      <!-- Progress state -->
+      <div class="card hidden" id="progress-card">
+        <div class="spinner"></div>
+        <p class="status-text" id="status-text">Document verwerken&hellip;</p>
+      </div>
+
+      <!-- Error state -->
+      <div class="card hidden" id="error-card">
+        <div class="error-icon">&#9888;</div>
+        <p class="error-text" id="error-text"></p>
+        <button class="btn btn-outline" id="retry-btn">Opnieuw proberen</button>
+      </div>
+
+    </main>
+
+    <footer>
+      <p>Verwerking vindt lokaal op de server plaats &mdash; uw document wordt niet opgeslagen.</p>
+    </footer>
+
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
