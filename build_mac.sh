@@ -13,7 +13,7 @@
 #   chmod +x build_mac.sh
 #   ./build_mac.sh
 #
-# Resultaat: dist/PrintScript.app  (~500–600 MB, volledig standalone)
+# Resultaat: dist/PrintScript.app  (~320 MB, volledig standalone, LibreOffice GUI-onderdelen gestript)
 
 set -euo pipefail
 

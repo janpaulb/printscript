@@ -142,6 +142,8 @@ git push --tags
 
 De DMGs verschijnen onder **Releases** zodra de build klaar is (~10–15 minuten). Teamleden en eindgebruikers downloaden gewoon de DMG — geen Terminal, geen Python, geen LibreOffice installeren.
 
+Je kunt de build ook handmatig starten via **Actions → Build macOS App → Run workflow** op GitHub.
+
 ### Automatische LibreOffice-updates
 
 De macOS-app controleert wekelijks op een nieuwe LibreOffice-versie en downloadt die op de achtergrond. Een banner in de UI meldt wanneer een update gereed is. De update wordt bij de volgende herstart toegepast.
@@ -231,7 +233,7 @@ Elke conversie krijgt een eigen LibreOffice-gebruikersprofiel (`-env:UserInstall
 |---|---|
 | Max. bestandsgrootte upload | 50 MB |
 | Max. Google Docs download | 50 MB |
-| LibreOffice-conversie timeout | 120 seconden |
+| LibreOffice-conversie timeout | 120 s (webserver) / 120 s (macOS-app) |
 | Google Docs verbindingstimeout | 10 seconden |
 | Google Docs leestimeout | 300 seconden |
 | Ondersteunde invoerformaten | `.docx` |

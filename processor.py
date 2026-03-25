@@ -448,14 +448,24 @@ def convert_to_pdf(docx_path: str, output_dir: str) -> str:
     """
     Convert a .docx file to PDF using LibreOffice headless.
 
-    Attempt order (Linux servers without a display):
-      1. SAL_USE_VCLPLUGIN=svp  – headless software renderer (needs libreoffice-headless)
-      2. xvfb-run               – virtual X11 framebuffer (needs xvfb)
-    On macOS the svp plugin is not available; LibreOffice uses its native
-    renderer which works headlessly without any extra setup.
+    Platform strategy
+    ─────────────────
+    macOS
+        LibreOffice uses its native (Aqua) renderer.  The --headless flag alone
+        is enough — no DISPLAY variable exists on macOS and SAL_USE_VCLPLUGIN
+        must NOT be set (the svp plugin is Linux-only; forcing it causes the
+        very "no windowing system" error we are trying to avoid).
+
+    Linux (and everything else)
+        Attempt 1 — SAL_USE_VCLPLUGIN=svp
+            Software renderer shipped with libreoffice-headless.  Fastest and
+            most reliable; no X11 server needed.
+        Attempt 2 — xvfb-run
+            Virtual X11 framebuffer.  Fallback for distros where
+            libreoffice-headless is not (yet) installed.
 
     Each call gets an isolated LibreOffice user profile so concurrent
-    conversions don't clash on the shared default profile directory.
+    conversions do not clash on the shared default profile directory.
     """
     profile_dir = os.path.join(output_dir, f'lo_profile_{uuid.uuid4().hex}')
     os.makedirs(profile_dir, exist_ok=True)
@@ -463,27 +473,33 @@ def convert_to_pdf(docx_path: str, output_dir: str) -> str:
     binary = _find_libreoffice()
     cmd    = _lo_cmd(binary, profile_dir, output_dir, docx_path)
 
-    # ── Attempt 1: SAL_USE_VCLPLUGIN=svp (headless renderer) ────────────────
-    env = os.environ.copy()
-    env['SAL_USE_VCLPLUGIN'] = 'svp'
-    env.pop('DISPLAY', None)
-    env.pop('WAYLAND_DISPLAY', None)
+    if sys.platform == 'darwin':
+        # ── macOS: native renderer, --headless flag alone is sufficient ──────
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120,
+            env=os.environ.copy(),
+        )
+    else:
+        # ── Linux: Attempt 1 — SAL_USE_VCLPLUGIN=svp ─────────────────────────
+        env = os.environ.copy()
+        env['SAL_USE_VCLPLUGIN'] = 'svp'
+        env.pop('DISPLAY', None)
+        env.pop('WAYLAND_DISPLAY', None)
 
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
 
-    # ── Attempt 2: xvfb-run (virtual X11 framebuffer) ────────────────────────
-    # Fallback for LibreOffice builds that don't ship the svp plugin
-    # (common on Debian/Ubuntu when only libreoffice-writer is installed).
-    if result.returncode != 0 and _is_display_error(result.stderr):
-        xvfb = shutil.which('xvfb-run')
-        if xvfb:
-            env2 = os.environ.copy()
-            env2.pop('DISPLAY', None)
-            env2.pop('WAYLAND_DISPLAY', None)
-            result = subprocess.run(
-                [xvfb, '-a', '--server-args=-screen 0 1024x768x24'] + cmd,
-                capture_output=True, text=True, timeout=120, env=env2,
-            )
+        # ── Linux: Attempt 2 — xvfb-run (virtual X11 framebuffer) ───────────
+        # Fallback when libreoffice-headless (svp plugin) is not installed.
+        if result.returncode != 0 and _is_display_error(result.stderr):
+            xvfb = shutil.which('xvfb-run')
+            if xvfb:
+                env2 = os.environ.copy()
+                env2.pop('DISPLAY', None)
+                env2.pop('WAYLAND_DISPLAY', None)
+                result = subprocess.run(
+                    [xvfb, '-a', '--server-args=-screen 0 1024x768x24'] + cmd,
+                    capture_output=True, text=True, timeout=120, env=env2,
+                )
 
     if result.returncode != 0:
         # Always log the raw LibreOffice output so server admins can diagnose
