@@ -28,6 +28,7 @@ a = Analysis(
         'lxml.etree',
         # pywebview macOS backend
         'webview.platforms.cocoa',
+        'webview.platforms.macosx',
         # pyobjc frameworks used by pywebview on macOS
         'objc',
         'Foundation',

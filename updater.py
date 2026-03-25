@@ -199,10 +199,17 @@ def _notify(callback, payload: dict) -> None:
 
 def _download_and_stage(url: str, version: str, progress_cb) -> None:
     """Download the DMG, mount it, copy LibreOffice.app/Contents to STAGED_DIR."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        dmg = os.path.join(tmpdir, 'LibreOffice.dmg')
-        mnt = os.path.join(tmpdir, 'lo_mount')
-        os.makedirs(mnt)
+    import uuid as _uuid
+
+    # Use SUPPORT_DIR for the temp DMG — /tmp on macOS is a RAM disk
+    # that may be too small for a ~400 MB DMG.
+    SUPPORT_DIR.mkdir(parents=True, exist_ok=True)
+    dmg      = SUPPORT_DIR / f'LibreOffice_{version}.dmg'
+    # Unique mountpoint avoids collisions with previous crashed sessions
+    mnt_path = SUPPORT_DIR / f'lo_mount_{_uuid.uuid4().hex}'
+
+    try:
+        mnt_path.mkdir(parents=True, exist_ok=True)
 
         # ── Download ────────────────────────────────────────────────────────
         r = requests.get(url, stream=True, timeout=600)
@@ -221,14 +228,16 @@ def _download_and_stage(url: str, version: str, progress_cb) -> None:
                     })
 
         # ── Mount DMG ───────────────────────────────────────────────────────
+        _notify(progress_cb, {'status': 'extracting', 'version': version})
+
         subprocess.run(
-            ['hdiutil', 'attach', dmg, '-readonly',
-             '-mountpoint', mnt, '-quiet', '-nobrowse'],
+            ['hdiutil', 'attach', str(dmg), '-readonly',
+             '-mountpoint', str(mnt_path), '-quiet', '-nobrowse'],
             check=True,
         )
         try:
-            lo_app = os.path.join(mnt, 'LibreOffice.app')
-            if not os.path.isdir(lo_app):
+            lo_app = mnt_path / 'LibreOffice.app'
+            if not lo_app.is_dir():
                 raise RuntimeError('LibreOffice.app niet gevonden in DMG')
 
             # ── Copy to staged dir ─────────────────────────────────────────
@@ -236,25 +245,31 @@ def _download_and_stage(url: str, version: str, progress_cb) -> None:
                 shutil.rmtree(STAGED_DIR)
             STAGED_DIR.mkdir(parents=True)
 
-            # Copy Contents/ from LibreOffice.app into STAGED_DIR/Contents/
             subprocess.run(
-                ['cp', '-r',
-                 os.path.join(lo_app, 'Contents'),
-                 str(STAGED_DIR / 'Contents')],
+                ['cp', '-r', str(lo_app / 'Contents'), str(STAGED_DIR / 'Contents')],
                 check=True,
             )
 
             # Remove macOS quarantine so the binary can be executed
-            subprocess.run(
-                ['xattr', '-cr', str(STAGED_DIR)],
-                check=False,
-            )
+            subprocess.run(['xattr', '-cr', str(STAGED_DIR)], check=False)
 
             # Write version marker
             (STAGED_DIR / 'lo_version.txt').write_text(version)
 
         finally:
-            subprocess.run(['hdiutil', 'detach', mnt, '-quiet'], check=False)
+            subprocess.run(['hdiutil', 'detach', str(mnt_path), '-quiet'], check=False)
+
+    finally:
+        # Clean up temp files regardless of success or failure
+        try:
+            dmg.unlink(missing_ok=True)
+        except Exception:
+            pass
+        try:
+            if mnt_path.exists():
+                mnt_path.rmdir()
+        except Exception:
+            pass
 
 
 def check_and_download_update(status_callback=None) -> None:

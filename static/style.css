@@ -17,7 +17,7 @@
 }
 
 body {
-  font-family: 'Segoe UI', system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   background: var(--bg);
   color: var(--text);
   min-height: 100vh;
@@ -142,6 +142,10 @@ header { text-align: center; }
   font-size: .8rem;
   color: var(--text-muted);
   min-height: 1.2em;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 #file-input { display: none; }
 
@@ -275,10 +279,12 @@ footer {
 }
 
 /* ── Update banner ────────────────────────────────────────────────────── */
+/* Uses visibility+opacity (not .hidden) so CSS transitions work.        */
 .update-banner {
   position: fixed;
   bottom: 20px;
   right: 20px;
+  z-index: 100;
   background: var(--surface-2);
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -289,8 +295,16 @@ footer {
   font-size: .82rem;
   color: var(--text-muted);
   box-shadow: 0 4px 20px rgba(0,0,0,.4);
-  max-width: 280px;
-  transition: opacity var(--transition);
+  max-width: 300px;
+  /* Start invisible; JS adds .visible to fade it in */
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity .3s ease, visibility .3s ease;
+}
+
+.update-banner.visible {
+  opacity: 1;
+  visibility: visible;
 }
 
 .update-banner.ready {

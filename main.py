@@ -119,9 +119,6 @@ def main() -> None:
     os.environ['PRINTSCRIPT_BASE_DIR'] = _resource_path('.')
     port = _find_free_port()
 
-    # Pass the update queue to the Flask app so the endpoint can drain it
-    os.environ['PRINTSCRIPT_UPDATE_QUEUE_ID'] = str(id(update_queue))
-
     from app import app as flask_app  # noqa: PLC0415
     flask_app.config['UPDATE_QUEUE'] = update_queue
 
