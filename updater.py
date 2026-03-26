@@ -301,6 +301,17 @@ def _download_and_stage(url: str, version: str, progress_cb) -> None:
             # Remove macOS quarantine so the binary can be executed
             subprocess.run(['xattr', '-cr', str(STAGED_DIR)], check=False)
 
+            # ── Ad-hoc re-signing after stripping ──────────────────────────
+            # Stripping breaks the original TDF code signature. Library
+            # Validation (part of LibreOffice's Hardened Runtime) would then
+            # block dlopen() for the VCL plugin → "no suitable windowing
+            # system". Ad-hoc signing replaces the broken signature and
+            # disables Library Validation for this local copy.
+            subprocess.run(
+                ['codesign', '--force', '--deep', '--sign', '-', str(STAGED_DIR)],
+                check=False, capture_output=True,
+            )
+
             # Write version marker
             (STAGED_DIR / 'lo_version.txt').write_text(version)
 

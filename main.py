@@ -48,6 +48,46 @@ def _wait_for_port(port: int, timeout: float = 15.0) -> bool:
     return False
 
 
+def _remove_lo_quarantine() -> None:
+    """
+    Strip macOS quarantine attributes and re-apply ad-hoc code signature on
+    the bundled LibreOffice directory at every app start.
+
+    Why this is needed at runtime (not just at build time):
+      • When the user installs the app from a downloaded DMG, macOS re-attaches
+        com.apple.quarantine to the .app bundle's contents.
+      • Quarantined dylibs cannot be loaded via dlopen() — LibreOffice's VCL
+        plugin loader would fail with "no suitable windowing system found".
+      • build_mac.sh removes quarantine before PyInstaller runs, but the DMG
+        download re-introduces it when the user installs the app.
+
+    Ad-hoc re-signing is also attempted:
+      • Stripping the bundle (removing gallery/, template/ etc.) breaks
+        LibreOffice's original notarized code signature.
+      • Library Validation (part of Hardened Runtime) would then block the
+        VCL plugin dlopen() even without quarantine.
+      • codesign --force --deep --sign - replaces the broken signature and
+        disables Library Validation for this local copy.
+
+    Both operations are fast (< 1 s on the already-extracted bundle), silent
+    on failure, and safe to repeat on every launch.
+    """
+    import subprocess as _sp
+
+    lo_dir = _resource_path('LibreOffice')
+    if not os.path.isdir(lo_dir):
+        return  # Not a bundled build (e.g. dev run without build_mac.sh)
+
+    # 1. Remove quarantine
+    _sp.run(['xattr', '-cr', lo_dir], check=False, capture_output=True)
+
+    # 2. Ad-hoc re-sign to neutralise Library Validation
+    _sp.run(
+        ['codesign', '--force', '--deep', '--sign', '-', lo_dir],
+        check=False, capture_output=True,
+    )
+
+
 def _error_html(message: str) -> str:
     safe = (message
             .replace('&', '&amp;')
@@ -92,6 +132,16 @@ update_queue: queue.Queue = queue.Queue()
 
 def main() -> None:
     import webview  # noqa: PLC0415
+
+    # ── 0. Remove quarantine from bundled LibreOffice ────────────────────────
+    # When the user downloads and installs our DMG, macOS may attach quarantine
+    # extended attributes to all files inside the bundle — including the soffice
+    # binary and its dylibs. Even if removed at build time (build_mac.sh), the
+    # attributes can be re-applied by the OS during DMG extraction or app copy.
+    # A quarantined dylib cannot be loaded by dlopen(), which would cause
+    # "no suitable windowing system found" on the very first conversion.
+    # We also re-sign ad-hoc here if the signature was somehow lost.
+    _remove_lo_quarantine()
 
     # ── 1. Apply any pending LibreOffice update ──────────────────────────────
     try:

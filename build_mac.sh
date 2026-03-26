@@ -127,6 +127,24 @@ ok "LibreOffice gestript: ${STRIPPED_SIZE}"
 # Verwijder quarantine-attribuut zodat de binary uitvoerbaar is
 xattr -cr "$BUNDLE_DIR" 2>/dev/null || true
 
+# ── Ad-hoc code-signing na het strippen ───────────────────────────────────────
+# KRITISCH: stripping verwijdert bestanden uit de LibreOffice-bundle, waardoor
+# de originele code-signature van The Document Foundation ongeldig wordt.
+# LibreOffice is notarized (Hardened Runtime + Library Validation). Wanneer
+# de soffice-binary vervolgens dlopen() aanroept voor libvclplug_svp.dylib,
+# controleert macOS of de bundle-signature geldig is — dat is hij niet meer →
+# dlopen geblokkeerd → "no suitable windowing system found, exiting".
+#
+# Oplossing: ad-hoc re-signing. De '-' (min) als identity is de macOS
+# standaard voor lokaal ondertekenen zonder Apple-certificaat. Dit:
+#   1. Ondertekent alle executables en dylibs opnieuw (--deep)
+#   2. Maakt Library Validation inactief voor deze kopie
+#   3. Laat dlopen() de VCL-plugin gewoon laden
+echo "   LibreOffice bundle ad-hoc ondertekenen…"
+codesign --force --deep --sign - "$BUNDLE_DIR" 2>/dev/null \
+  && ok "Ad-hoc ondertekening klaar" \
+  || warn "codesign niet beschikbaar — conversie kan mislukken op macOS"
+
 # Versie-markering opslaan (gebruikt door updater.py)
 echo "$LO_VERSION" > "$BUNDLE_DIR/lo_version.txt"
 ok "LibreOffice $LO_VERSION klaar in bundled_libreoffice/"
