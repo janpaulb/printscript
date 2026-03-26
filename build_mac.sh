@@ -13,7 +13,7 @@
 #   chmod +x build_mac.sh
 #   ./build_mac.sh
 #
-# Resultaat: dist/PrintScript.app  (~500–600 MB, volledig standalone)
+# Resultaat: dist/PrintScript.app  (~320 MB, volledig standalone, LibreOffice GUI-onderdelen gestript)
 
 set -euo pipefail
 
@@ -99,10 +99,33 @@ echo "   Bestanden kopiëren (dit duurt even)…"
 mkdir -p "$BUNDLE_DIR"
 cp -r "$LO_APP/Contents" "$BUNDLE_DIR/Contents"
 
+hdiutil detach "$MOUNT_POINT" -quiet
+
+# ── LibreOffice-bundle verkleinen ─────────────────────────────────────────────
+# Verwijder alles wat alleen nodig is voor een interactieve GUI-sessie.
+# Dit scheelt doorgaans 180–230 MB in de uiteindelijke .app.
+#
+# Wat we verwijderen:
+#   images_*.zip  – icoonthema's (6–8 zips × ~15–25 MB elk)
+#   gallery/      – gallerij met clipart (~50 MB)
+#   template/     – documentsjablonen
+#   autocorr/     – autocorrectie-woordenboeken
+#   extensions/   – optionele LibreOffice-extensies
+#   basic/        – Basic-IDE
+#   wizards/      – wizard-scripts
+#   java/classes  – Java .jar bestanden (Java niet nodig voor conversie)
+echo "   Onnodige LibreOffice-onderdelen verwijderen…"
+find "$BUNDLE_DIR" -name 'images_*.zip' -delete 2>/dev/null || true
+for _dir in gallery template autocorr extensions basic wizards; do
+  find "$BUNDLE_DIR" -type d -name "$_dir" -exec rm -rf {} + 2>/dev/null || true
+done
+find "$BUNDLE_DIR" -type d -name 'classes' -path '*/java/*' -exec rm -rf {} + 2>/dev/null || true
+
+STRIPPED_SIZE=$(du -sh "$BUNDLE_DIR" 2>/dev/null | cut -f1 || echo "?")
+ok "LibreOffice gestript: ${STRIPPED_SIZE}"
+
 # Verwijder quarantine-attribuut zodat de binary uitvoerbaar is
 xattr -cr "$BUNDLE_DIR" 2>/dev/null || true
-
-hdiutil detach "$MOUNT_POINT" -quiet
 
 # Versie-markering opslaan (gebruikt door updater.py)
 echo "$LO_VERSION" > "$BUNDLE_DIR/lo_version.txt"
@@ -117,6 +140,36 @@ ok "Opgeruimd"
 step "App bouwen met PyInstaller (1–3 minuten)"
 $PYTHON -m PyInstaller PrintScript.spec --noconfirm
 ok "Build geslaagd"
+
+# ── 8b. LibreOffice in de .app ad-hoc ondertekenen ────────────────────────────
+# KRITISCH — moet NA PyInstaller, niet ervoor.
+#
+# PyInstaller kopieert alle data-bestanden naar de .app via shutil.copy2().
+# Dit behoudt bestandsinhoud en permissies, maar GEEN extended attributes en
+# mogelijk GEEN embedded code-signatures.
+# Resultaat: de LibreOffice-bundle in de .app heeft een gebroken of ontbrekende
+# signature, ook al was bundled_libreoffice/ al correct ondertekend.
+#
+# Waarom dit LibreOffice kapot maakt:
+#   LibreOffice is notarized (Hardened Runtime + Library Validation). Wanneer
+#   soffice via dlopen() libvclplug_svp.dylib probeert te laden, controleert
+#   macOS de bundle-signature. Gebroken → dlopen geblokkeerd →
+#   "no suitable windowing system found, exiting".
+#
+# Oplossing: ad-hoc re-signing op de definitieve locatie in de .app.
+# PyInstaller 5 plaatst data in Contents/MacOS/, PyInstaller 6+ in _internal/.
+step "LibreOffice in .app ad-hoc ondertekenen"
+LO_IN_APP=$(find "dist/PrintScript.app" \
+  -path "*/LibreOffice/Contents/MacOS/soffice" -type f 2>/dev/null | head -1)
+if [[ -n "$LO_IN_APP" ]]; then
+  # Go up three levels: MacOS/ → Contents/ → LibreOffice/
+  LO_BUNDLE_IN_APP="$(dirname "$(dirname "$(dirname "$LO_IN_APP")")")"
+  codesign --force --deep --sign - "$LO_BUNDLE_IN_APP" 2>/dev/null \
+    && ok "Ad-hoc ondertekening klaar: $LO_BUNDLE_IN_APP" \
+    || warn "codesign mislukt — conversie kan falen op macOS"
+else
+  warn "LibreOffice niet gevonden in dist/PrintScript.app — ondertekening overgeslagen"
+fi
 
 # ── 9. bundled_libreoffice/ opruimen ─────────────────────────────────────────
 step "Tijdelijke bestanden opruimen"

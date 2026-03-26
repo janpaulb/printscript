@@ -4,13 +4,17 @@ Flask web application entry point.
 """
 
 import io
+import logging
 import os
+import queue
 import re
 import shutil
 import sys
 import tempfile
 import uuid
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 from flask import Flask, jsonify, render_template, request, send_file
 from werkzeug.exceptions import RequestEntityTooLarge
@@ -107,6 +111,7 @@ def convert():
 
         response = _pdf_response(output_path, f'{stem}_printscript.pdf')
     except Exception as exc:
+        log.exception('Conversie mislukt: bestand=%s', file.filename)
         return jsonify(error=f'Conversie mislukt: {exc}'), 500
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -143,6 +148,7 @@ def convert_url():
     except (ValueError, RuntimeError) as exc:
         return jsonify(error=str(exc)), 400
     except Exception as exc:
+        log.exception('Conversie mislukt: url=%s', url)
         return jsonify(error=f'Conversie mislukt: {exc}'), 500
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
@@ -163,7 +169,7 @@ def update_status():
         while True:
             try:
                 latest = q.get_nowait()
-            except Exception:
+            except queue.Empty:
                 break
 
     if latest:
@@ -187,5 +193,13 @@ def update_status():
 
 
 if __name__ == '__main__':
+    import logging
+    logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
+
+    # Ensure LibreOffice can run headlessly before accepting requests.
+    # On Linux this auto-installs libreoffice-headless or xvfb if needed.
+    from processor import bootstrap_headless_libreoffice
+    bootstrap_headless_libreoffice()
+
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)

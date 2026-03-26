@@ -48,6 +48,60 @@ def _wait_for_port(port: int, timeout: float = 15.0) -> bool:
     return False
 
 
+def _remove_lo_quarantine() -> None:
+    """
+    Ensure the bundled LibreOffice can load its VCL plugin dylibs at runtime.
+
+    Two problems can prevent dlopen() from loading libvclplug_svp.dylib:
+
+    1. Quarantine (com.apple.quarantine)
+       When the user installs the app from a downloaded DMG, macOS attaches
+       quarantine to all files inside the bundle.  Quarantined dylibs cannot
+       be loaded via dlopen().  We remove quarantine on every launch (fast,
+       < 1 s) using xattr -cr.
+
+    2. Broken code signature / Library Validation
+       LibreOffice is notarized (Hardened Runtime + Library Validation).
+       PyInstaller copies data files via shutil.copy2() which does NOT preserve
+       extended attributes or embedded code signatures, so the LibreOffice
+       bundle inside the .app may have an invalid/absent signature.
+       Library Validation then blocks every dlopen() call.
+       build_mac.sh already re-signs AFTER PyInstaller, but if the signature
+       is still broken (first install, version update, etc.) we detect and fix
+       it here.
+
+    Performance:
+       codesign --verify is fast (< 1 s).  codesign --force --deep is slow
+       (~60 s for a stripped 300 MB LibreOffice bundle) but only runs ONCE —
+       when the signature is actually broken.  Every subsequent launch the
+       verify step passes and we skip the slow re-sign entirely.
+    """
+    import subprocess as _sp
+
+    lo_dir = _resource_path('LibreOffice')
+    if not os.path.isdir(lo_dir):
+        return  # Not a bundled build (dev run without build_mac.sh)
+
+    # 1. Remove quarantine — always, fast (< 1 s)
+    _sp.run(['xattr', '-cr', lo_dir], check=False, capture_output=True)
+
+    # 2. Check signature — skip the slow re-sign if already valid
+    soffice = os.path.join(lo_dir, 'Contents', 'MacOS', 'soffice')
+    if os.path.isfile(soffice):
+        check = _sp.run(
+            ['codesign', '-v', '--no-strict', soffice],
+            capture_output=True,
+        )
+        if check.returncode == 0:
+            return  # Signature valid — nothing more to do
+
+    # 3. Signature broken or absent — re-sign ad-hoc (runs once, ~60 s)
+    _sp.run(
+        ['codesign', '--force', '--deep', '--sign', '-', lo_dir],
+        check=False, capture_output=True,
+    )
+
+
 def _error_html(message: str) -> str:
     safe = (message
             .replace('&', '&amp;')
@@ -92,6 +146,16 @@ update_queue: queue.Queue = queue.Queue()
 
 def main() -> None:
     import webview  # noqa: PLC0415
+
+    # ── 0. Remove quarantine from bundled LibreOffice ────────────────────────
+    # When the user downloads and installs our DMG, macOS may attach quarantine
+    # extended attributes to all files inside the bundle — including the soffice
+    # binary and its dylibs. Even if removed at build time (build_mac.sh), the
+    # attributes can be re-applied by the OS during DMG extraction or app copy.
+    # A quarantined dylib cannot be loaded by dlopen(), which would cause
+    # "no suitable windowing system found" on the very first conversion.
+    # We also re-sign ad-hoc here if the signature was somehow lost.
+    _remove_lo_quarantine()
 
     # ── 1. Apply any pending LibreOffice update ──────────────────────────────
     try:

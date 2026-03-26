@@ -1,0 +1,14 @@
+services:
+  printscript:
+    build: .
+    ports:
+      - "5000:5000"
+    restart: unless-stopped
+    healthcheck:
+      # Use Python's built-in urllib — no curl needed in the slim image
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:5000/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s   # give gunicorn + LibreOffice bootstrap time to start

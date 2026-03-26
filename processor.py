@@ -8,15 +8,174 @@ Transforms a .docx file into a print-ready PDF by:
   4. Keeping page-number footer intact
 """
 
+import logging
 import os
 import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import uuid
 
 from docx import Document
 from docx.oxml.ns import qn
+
+
+# ---------------------------------------------------------------------------
+# Headless bootstrap — auto-install missing system packages on Linux
+# ---------------------------------------------------------------------------
+
+log = logging.getLogger(__name__)
+
+_bootstrap_lock = threading.Lock()
+_bootstrap_done = False
+
+
+def _try_apt_install(*packages: str) -> bool:
+    """
+    Attempt to install one or more Debian/Ubuntu packages via apt-get.
+    Runs 'apt-get update' first so the package can be found even in fresh
+    containers where the apt cache has never been populated.
+    Returns True if the install command succeeded.
+    Logs failures but never raises so callers stay unaffected.
+    """
+    if sys.platform != 'linux' or not shutil.which('apt-get'):
+        return False
+    apt_env = {**os.environ, 'DEBIAN_FRONTEND': 'noninteractive'}
+    try:
+        # Refresh index first — a cold apt cache causes "Unable to locate package"
+        subprocess.run(
+            ['apt-get', 'update', '-q'],
+            capture_output=True, timeout=120, env=apt_env,
+        )
+        r = subprocess.run(
+            ['apt-get', 'install', '-y', '--no-install-recommends', *packages],
+            capture_output=True,
+            timeout=180,
+            env=apt_env,
+        )
+        if r.returncode != 0:
+            log.warning(
+                'apt-get install %s failed (rc=%d): %s',
+                ' '.join(packages), r.returncode,
+                r.stderr.decode(errors='replace') if isinstance(r.stderr, bytes) else r.stderr,
+            )
+        return r.returncode == 0
+    except PermissionError:
+        log.warning(
+            'apt-get install %s skipped: no root privileges. '
+            'Run manually: sudo apt-get install %s',
+            ' '.join(packages), ' '.join(packages),
+        )
+        return False
+    except Exception as exc:
+        log.warning('apt-get install %s failed: %s', ' '.join(packages), exc)
+        return False
+
+
+def _lo_works_headless() -> bool:
+    """
+    Return True if LibreOffice can actually convert a document without a display.
+
+    We intentionally do NOT run 'libreoffice --version' here: that command
+    skips VCL initialisation entirely and returns 0 even when the headless
+    plugin is missing — giving a false-positive that tricks bootstrap into
+    thinking everything is fine.
+
+    Instead we check directly whether the svp VCL plugin library exists on
+    disk (installed by the libreoffice-headless package) or whether xvfb-run
+    is available as a fallback display server.
+
+    We search all known install locations:
+      - /usr/lib/libreoffice     (Debian/Ubuntu standard)
+      - /usr/lib64/libreoffice   (RHEL/Fedora/openSUSE)
+      - /opt/libreoffice*        (manually downloaded tarball)
+      - /snap/libreoffice/*      (Snap package)
+      - directory next to the libreoffice binary (custom/portable installs)
+    """
+    if sys.platform != 'linux':
+        return True  # macOS uses its native renderer; no special setup needed
+
+    import glob as _glob
+
+    # Candidate glob patterns — order is fastest-match-first
+    patterns = [
+        '/usr/lib/libreoffice/program/libvclplug_svp*.so',
+        '/usr/lib64/libreoffice/program/libvclplug_svp*.so',
+        '/opt/libreoffice*/program/libvclplug_svp*.so',
+        '/snap/libreoffice/*/usr/lib/libreoffice/program/libvclplug_svp*.so',
+    ]
+    if any(_glob.glob(p) for p in patterns):
+        return True
+
+    # Also check relative to the actual soffice binary (handles custom/portable installs)
+    lo_bin = shutil.which('libreoffice') or shutil.which('soffice')
+    if lo_bin:
+        prog_dir = os.path.dirname(os.path.realpath(lo_bin))
+        if _glob.glob(os.path.join(prog_dir, 'libvclplug_svp*.so')):
+            return True
+
+    # xvfb-run provides a virtual X11 display as a fallback
+    return bool(shutil.which('xvfb-run'))
+
+
+def bootstrap_headless_libreoffice() -> None:
+    """
+    Ensure LibreOffice can run headlessly. Safe to call from multiple threads
+    or processes: the inner work runs exactly once per process thanks to a
+    module-level lock + flag; apt-get's own advisory lock prevents concurrent
+    installs across processes.
+
+    On Linux: verifies that the svp VCL plugin is present (or xvfb-run is
+    available) and installs the missing package automatically via apt-get.
+
+    Silent on macOS (native renderer; no extra packages needed) and when
+    apt-get is unavailable (non-Debian systems).
+
+    The first cold start may take 30–60 s while the package downloads;
+    every subsequent start is instant because the package stays installed.
+    """
+    global _bootstrap_done
+
+    # Fast path — already done in this process (no lock needed for read)
+    if _bootstrap_done:
+        return
+
+    if sys.platform != 'linux':
+        _bootstrap_done = True
+        return
+
+    with _bootstrap_lock:
+        # Re-check inside the lock (double-checked locking)
+        if _bootstrap_done:
+            return
+
+        try:
+            if _lo_works_headless():
+                return  # Already fine — nothing to do
+
+            log.warning(
+                'LibreOffice headless check failed. '
+                'Attempting to install libreoffice-headless automatically…'
+            )
+
+            if _try_apt_install('libreoffice-headless'):
+                if _lo_works_headless():
+                    log.info('libreoffice-headless installed successfully.')
+                    return
+                log.warning('libreoffice-headless installed but check still fails. Trying xvfb…')
+
+            if _try_apt_install('xvfb'):
+                log.info('xvfb installed as fallback display backend.')
+                return
+
+            log.error(
+                'Could not fix LibreOffice display issue automatically. '
+                'Run manually: sudo apt-get install libreoffice-headless'
+            )
+        finally:
+            # Mark done regardless of outcome so we never re-run in this process
+            _bootstrap_done = True
 
 
 # ---------------------------------------------------------------------------
@@ -266,48 +425,144 @@ def _remove_drawing_elements(element):
 # 4. Convert processed .docx → PDF via LibreOffice
 # ---------------------------------------------------------------------------
 
+def _lo_cmd(binary: str, profile_dir: str, output_dir: str, docx_path: str) -> list:
+    return [
+        binary,
+        '--headless',
+        '--norestore',
+        '--nofirststartwizard',
+        f'-env:UserInstallation=file://{profile_dir}',
+        '--convert-to', 'pdf',
+        '--outdir', output_dir,
+        docx_path,
+    ]
+
+
+def _lo_env(extra: dict | None = None) -> dict:
+    """
+    Build a clean environment for the LibreOffice subprocess.
+
+    The critical problem on macOS inside a PyInstaller-frozen app:
+    PyInstaller injects DYLD_LIBRARY_PATH (and related DYLD_* vars) pointing
+    to its _MEIPASS extraction directory so the frozen Python host finds its
+    own bundled dylibs.  LibreOffice inherits this environment as a subprocess.
+    When LibreOffice calls dlopen() to load its VCL plugin (libvclplug_svp.dylib)
+    the dynamic linker starts its search in _MEIPASS — where it finds
+    incompatible versions of system frameworks — and the load fails with
+    "no suitable windowing system found, exiting".
+
+    Fix: strip every DYLD_* variable that PyInstaller may have set before
+    handing the environment to LibreOffice.  This is safe because LibreOffice
+    uses @rpath / @executable_path (baked into the binary at link time) to
+    find its own frameworks, so it does not need DYLD_LIBRARY_PATH.
+    """
+    env = os.environ.copy()
+    for var in (
+        'DYLD_LIBRARY_PATH',
+        'DYLD_FRAMEWORK_PATH',
+        'DYLD_FALLBACK_LIBRARY_PATH',
+        'DYLD_INSERT_LIBRARIES',
+        # PyInstaller also sets these; they should not reach LibreOffice
+        'PYTHONPATH',
+        'PYTHONHOME',
+    ):
+        env.pop(var, None)
+    if extra:
+        env.update(extra)
+    return env
+    markers = ('windowing system', 'cannot connect to x', 'no display')
+    low = stderr.lower()
+    return any(m in low for m in markers)
+
+
 def convert_to_pdf(docx_path: str, output_dir: str) -> str:
     """
     Convert a .docx file to PDF using LibreOffice headless.
 
-    Each call gets an isolated LibreOffice user profile so that concurrent
-    conversions don't clash on the shared default profile directory.
+    Platform strategy
+    ─────────────────
+    macOS (PyInstaller frozen app)
+        The svp VCL plugin ships with the macOS LibreOffice DMG and is the
+        correct headless renderer.  However, PyInstaller injects DYLD_LIBRARY_PATH
+        into the process environment so its frozen Python host finds its dylibs.
+        LibreOffice inherits this as a subprocess: dlopen() for libvclplug_svp.dylib
+        starts searching _MEIPASS, finds incompatible system frameworks, and
+        fails with "no suitable windowing system found".
+        Fix: _lo_env() scrubs all DYLD_* loader overrides before exec.
+        Attempt 1 — SAL_USE_VCLPLUGIN=svp + clean env  (preferred)
+        Attempt 2 — bare --headless (Aqua fallback for older LO builds)
 
-    Returns the path to the generated PDF.
-    Raises RuntimeError on failure.
+    Linux
+        Attempt 1 — SAL_USE_VCLPLUGIN=svp
+            Software renderer shipped with libreoffice-headless.
+        Attempt 2 — xvfb-run
+            Virtual X11 framebuffer fallback.
+
+    Each call gets an isolated LibreOffice user profile so concurrent
+    conversions do not clash on the shared default profile directory.
     """
-    # Unique profile dir prevents lock conflicts under concurrent load
     profile_dir = os.path.join(output_dir, f'lo_profile_{uuid.uuid4().hex}')
     os.makedirs(profile_dir, exist_ok=True)
 
-    # Build a clean environment for the subprocess.
-    # SAL_USE_VCLPLUGIN=svp forces the headless SVP renderer so LibreOffice
-    # never tries to open an X11/Wayland display — even without --headless.
-    # DISPLAY is removed for the same reason (avoids "no windowing system" crash
-    # on Linux servers). HOME must stay set so LibreOffice can write temp files.
-    env = os.environ.copy()
-    env['SAL_USE_VCLPLUGIN'] = 'svp'
-    env.pop('DISPLAY', None)
-    env.pop('WAYLAND_DISPLAY', None)
+    binary = _find_libreoffice()
+    cmd    = _lo_cmd(binary, profile_dir, output_dir, docx_path)
 
-    result = subprocess.run(
-        [
-            _find_libreoffice(),
-            '--headless',
-            '--norestore',
-            '--nofirststartwizard',
-            f'-env:UserInstallation=file://{profile_dir}',
-            '--convert-to', 'pdf',
-            '--outdir', output_dir,
-            docx_path,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=120,
-        env=env,
-    )
+    if sys.platform == 'darwin':
+        # ── macOS Attempt 1: SAL_USE_VCLPLUGIN=svp + clean env ───────────────
+        # The svp (software VCL) plugin ships with the macOS LibreOffice DMG
+        # and is the correct headless backend.  We MUST scrub DYLD_* loader
+        # variables that PyInstaller injects, otherwise LibreOffice's dlopen()
+        # resolves the plugin against the wrong _MEIPASS dylibs and crashes.
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120,
+            env=_lo_env({'SAL_USE_VCLPLUGIN': 'svp'}),
+        )
+
+        # ── macOS Attempt 2: bare --headless (Aqua renderer fallback) ─────────
+        # Some macOS LibreOffice builds (older or custom) don't ship the svp
+        # dylib.  In that case, try without the plugin hint — --headless alone
+        # is enough on recent LO versions.
+        if result.returncode != 0 and _is_display_error(result.stderr):
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=120,
+                env=_lo_env(),
+            )
+
+    else:
+        # ── Linux Attempt 1: SAL_USE_VCLPLUGIN=svp ───────────────────────────
+        env = _lo_env({'SAL_USE_VCLPLUGIN': 'svp'})
+        env.pop('DISPLAY', None)
+        env.pop('WAYLAND_DISPLAY', None)
+
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
+
+        # ── Linux Attempt 2: xvfb-run (virtual X11 framebuffer) ──────────────
+        # Fallback when libreoffice-headless (svp plugin) is not installed.
+        if result.returncode != 0 and _is_display_error(result.stderr):
+            xvfb = shutil.which('xvfb-run')
+            if xvfb:
+                env2 = _lo_env()
+                env2.pop('DISPLAY', None)
+                env2.pop('WAYLAND_DISPLAY', None)
+                result = subprocess.run(
+                    [xvfb, '-a', '--server-args=-screen 0 1024x768x24'] + cmd,
+                    capture_output=True, text=True, timeout=120, env=env2,
+                )
 
     if result.returncode != 0:
+        # Always log the raw LibreOffice output so server admins can diagnose
+        log.error(
+            'LibreOffice conversion failed (rc=%d)\nSTDOUT: %s\nSTDERR: %s',
+            result.returncode, result.stdout.strip(), result.stderr.strip(),
+        )
+        if _is_display_error(result.stderr):
+            raise RuntimeError(
+                'LibreOffice kan geen display vinden.\n'
+                'Installeer één van de volgende pakketten en start opnieuw:\n'
+                '  sudo apt-get install libreoffice-headless\n'
+                '  of: sudo apt-get install xvfb\n\n'
+                f'LibreOffice foutmelding:\n{result.stderr.strip()}'
+            )
         raise RuntimeError(
             f'PDF-conversie mislukt (LibreOffice rc={result.returncode}):\n'
             f'{result.stderr}'
@@ -332,7 +587,13 @@ def process(input_docx_path: str, output_pdf_path: str) -> None:
     Full pipeline: load → clean → save cleaned docx → convert to PDF.
     """
     with tempfile.TemporaryDirectory() as tmpdir:
-        doc = Document(input_docx_path)
+        try:
+            doc = Document(input_docx_path)
+        except Exception as exc:
+            raise RuntimeError(
+                'Kan het Word-document niet openen. '
+                'Controleer of het bestand niet beschadigd of versleuteld is.'
+            ) from exc
 
         remove_comments(doc)
         remove_highlighting(doc)

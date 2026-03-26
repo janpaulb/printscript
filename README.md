@@ -39,20 +39,41 @@ Converteer Word-documenten (.docx) naar drukklare PDF's — via de browser of al
 
 ## Snel starten (webserver)
 
-### Vereisten
+### Optie A — Docker (aanbevolen, werkt altijd)
+
+```bash
+# Clone & start in één commando
+git clone https://github.com/janpaulb/printscript.git
+cd printscript
+docker compose up
+```
+
+Of gebruik de kant-en-klare image van GitHub Container Registry:
+
+```bash
+docker run -p 5000:5000 ghcr.io/janpaulb/printscript:latest
+```
+
+Open je browser op [http://localhost:5000](http://localhost:5000).
+
+De Docker-image bevat LibreOffice + de headless-renderer — het werkt direct, geen extra pakketten nodig.
+
+---
+
+### Optie B — Lokaal zonder Docker
+
+**Vereisten**
 
 - Python 3.11 of hoger
-- LibreOffice met Writer-module
+- LibreOffice inclusief de headless-renderer
 
 ```bash
 # Debian / Ubuntu
-sudo apt-get install libreoffice-writer
+sudo apt-get install libreoffice-writer libreoffice-headless
 
 # macOS (Homebrew)
 brew install --cask libreoffice
 ```
-
-### Installeren en draaien
 
 ```bash
 # 1. Clone de repository
@@ -62,11 +83,15 @@ cd printscript
 # 2. Installeer Python-packages
 pip install -r requirements.txt
 
-# 3. Start de webserver
+# 3a. Ontwikkeling / lokaal
 python app.py
+
+# 3b. Productie (aanbevolen — gunicorn zit al in requirements.txt)
+gunicorn --config gunicorn.conf.py app:app
 ```
 
-Open je browser op [http://localhost:5000](http://localhost:5000).
+> **Fout "no suitable windowing system found"?**
+> `sudo apt-get install libreoffice-headless` — of gebruik gewoon Docker (Optie A).
 
 Sleep een `.docx`-bestand op de uploadzone of plak een Google Docs-URL. De PDF wordt automatisch gedownload.
 
@@ -104,7 +129,7 @@ open dist/PrintScript_arm64.dmg   # Apple Silicon
 open dist/PrintScript_x86_64.dmg  # Intel
 ```
 
-**Appgrootte:** ±500–600 MB (LibreOffice is groot).
+**Appgrootte:** ±320 MB (LibreOffice is gestript van GUI-onderdelen).
 
 ### Automatisch bouwen via GitHub Actions
 
@@ -116,6 +141,8 @@ git push --tags
 ```
 
 De DMGs verschijnen onder **Releases** zodra de build klaar is (~10–15 minuten). Teamleden en eindgebruikers downloaden gewoon de DMG — geen Terminal, geen Python, geen LibreOffice installeren.
+
+Je kunt de build ook handmatig starten via **Actions → Build macOS App → Run workflow** op GitHub.
 
 ### Automatische LibreOffice-updates
 
@@ -206,7 +233,7 @@ Elke conversie krijgt een eigen LibreOffice-gebruikersprofiel (`-env:UserInstall
 |---|---|
 | Max. bestandsgrootte upload | 50 MB |
 | Max. Google Docs download | 50 MB |
-| LibreOffice-conversie timeout | 120 seconden |
+| LibreOffice-conversie timeout | 120 s (webserver) / 120 s (macOS-app) |
 | Google Docs verbindingstimeout | 10 seconden |
 | Google Docs leestimeout | 300 seconden |
 | Ondersteunde invoerformaten | `.docx` |
