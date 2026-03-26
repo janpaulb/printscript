@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import urllib.parse
 import uuid
 
 from docx import Document
@@ -185,6 +186,17 @@ def bootstrap_headless_libreoffice() -> None:
 _LIBREOFFICE_BINARY: str | None = None  # module-level cache
 
 
+def _ensure_executable(path: str) -> None:
+    """Ensure a binary has the executable bit set (may be lost via shutil.copy2)."""
+    import stat as _stat
+    try:
+        mode = os.stat(path).st_mode
+        if not (mode & _stat.S_IXUSR):
+            os.chmod(path, mode | _stat.S_IXUSR | _stat.S_IXGRP | _stat.S_IXOTH)
+    except OSError:
+        pass  # Best-effort; failure will surface as a subprocess exec error
+
+
 def _find_libreoffice() -> str:
     """
     Return the path to the LibreOffice soffice binary.
@@ -211,6 +223,7 @@ def _find_libreoffice() -> str:
             from updater import get_active_soffice
             path = get_active_soffice()
             if path and os.path.isfile(path):
+                _ensure_executable(path)
                 _LIBREOFFICE_BINARY = path
                 return path
         except ImportError:
@@ -226,6 +239,7 @@ def _find_libreoffice() -> str:
         ]
         for path in candidates:
             if path and os.path.isfile(path):
+                _ensure_executable(path)
                 _LIBREOFFICE_BINARY = path
                 return path
 
@@ -431,7 +445,7 @@ def _lo_cmd(binary: str, profile_dir: str, output_dir: str, docx_path: str) -> l
         '--headless',
         '--norestore',
         '--nofirststartwizard',
-        f'-env:UserInstallation=file://{profile_dir}',
+        f'-env:UserInstallation=file://{urllib.parse.quote(profile_dir)}',
         '--convert-to', 'pdf',
         '--outdir', output_dir,
         docx_path,
@@ -576,6 +590,20 @@ def convert_to_pdf(docx_path: str, output_dir: str) -> str:
     if not os.path.exists(pdf_path):
         raise RuntimeError(
             f'LibreOffice produceerde geen PDF op het verwachte pad.\n'
+            f'stdout: {result.stdout}\nstderr: {result.stderr}'
+        )
+    # Validate the PDF is not empty or truncated
+    pdf_size = os.path.getsize(pdf_path)
+    if pdf_size < 1024:
+        raise RuntimeError(
+            f'LibreOffice produceerde een ongeldig PDF-bestand ({pdf_size} bytes).\n'
+            f'stdout: {result.stdout}\nstderr: {result.stderr}'
+        )
+    with open(pdf_path, 'rb') as _f:
+        magic = _f.read(4)
+    if magic != b'%PDF':
+        raise RuntimeError(
+            f'LibreOffice produceerde een beschadigd PDF-bestand (ongeldige header).\n'
             f'stdout: {result.stdout}\nstderr: {result.stderr}'
         )
     return pdf_path

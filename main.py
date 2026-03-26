@@ -147,7 +147,7 @@ update_queue: queue.Queue = queue.Queue()
 def main() -> None:
     import webview  # noqa: PLC0415
 
-    # ── 0. Remove quarantine from bundled LibreOffice ────────────────────────
+    # ── 0. Remove quarantine from bundled LibreOffice (background) ───────────
     # When the user downloads and installs our DMG, macOS may attach quarantine
     # extended attributes to all files inside the bundle — including the soffice
     # binary and its dylibs. Even if removed at build time (build_mac.sh), the
@@ -155,7 +155,13 @@ def main() -> None:
     # A quarantined dylib cannot be loaded by dlopen(), which would cause
     # "no suitable windowing system found" on the very first conversion.
     # We also re-sign ad-hoc here if the signature was somehow lost.
-    _remove_lo_quarantine()
+    #
+    # Run in a background thread so the window opens immediately.
+    # xattr -cr is fast (< 1 s); codesign --force --deep is slow (~60 s) but
+    # only runs ONCE when the signature is actually broken (first install).
+    # Subsequent launches just run the fast codesign -v check and return.
+    threading.Thread(target=_remove_lo_quarantine, daemon=True,
+                     name='lo-quarantine-removal').start()
 
     # ── 1. Apply any pending LibreOffice update ──────────────────────────────
     try:

@@ -51,7 +51,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/LibreOffice_*.dmg
-          key: lo-${{ matrix.lo_arch }}-${{ steps.lo_version.outputs.version }}
+          key: lo-${{ matrix.runner }}-${{ matrix.lo_arch }}-${{ steps.lo_version.outputs.version }}
 
       # ── App bouwen ──────────────────────────────────────────────────────────
       - name: PrintScript.app bouwen

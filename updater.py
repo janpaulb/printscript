@@ -182,6 +182,18 @@ def apply_staged_update() -> bool:
         _save_state(state)
         return True
     except Exception:
+        # Clear the ready flag so we don't loop trying to apply a broken update
+        state['update_ready'] = False
+        try:
+            _save_state(state)
+        except Exception:
+            pass
+        # Clean up any partial staged dir to avoid a corrupt active install
+        try:
+            if STAGED_DIR.exists():
+                shutil.rmtree(STAGED_DIR, ignore_errors=True)
+        except Exception:
+            pass
         return False
 
 
@@ -279,6 +291,7 @@ def _download_and_stage(url: str, version: str, progress_cb) -> None:
             ['hdiutil', 'attach', str(dmg), '-readonly',
              '-mountpoint', str(mnt_path), '-quiet', '-nobrowse'],
             check=True,
+            timeout=60,
         )
         try:
             lo_app = mnt_path / 'LibreOffice.app'
@@ -290,8 +303,10 @@ def _download_and_stage(url: str, version: str, progress_cb) -> None:
                 shutil.rmtree(STAGED_DIR)
             STAGED_DIR.mkdir(parents=True)
 
+            # ditto preserves extended attributes, resource forks, and
+            # embedded code-signature data — cp -r does not.
             subprocess.run(
-                ['cp', '-r', str(lo_app / 'Contents'), str(STAGED_DIR / 'Contents')],
+                ['ditto', str(lo_app / 'Contents'), str(STAGED_DIR / 'Contents')],
                 check=True,
             )
 
@@ -317,7 +332,10 @@ def _download_and_stage(url: str, version: str, progress_cb) -> None:
             (STAGED_DIR / 'lo_version.txt').write_text(version)
 
         finally:
-            subprocess.run(['hdiutil', 'detach', str(mnt_path), '-quiet'], check=False)
+            subprocess.run(
+                ['hdiutil', 'detach', str(mnt_path), '-quiet', '-force'],
+                check=False, timeout=30,
+            )
 
     finally:
         # Clean up temp files regardless of success or failure
@@ -327,7 +345,7 @@ def _download_and_stage(url: str, version: str, progress_cb) -> None:
             pass
         try:
             if mnt_path.exists():
-                mnt_path.rmdir()
+                shutil.rmtree(mnt_path, ignore_errors=True)
         except Exception:
             pass
 
