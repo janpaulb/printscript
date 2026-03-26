@@ -161,14 +161,18 @@ ok "Build geslaagd"
 step "LibreOffice in .app ad-hoc ondertekenen"
 LO_IN_APP=$(find "dist/PrintScript.app" \
   -path "*/LibreOffice/Contents/MacOS/soffice" -type f 2>/dev/null | head -1)
-if [[ -n "$LO_IN_APP" ]]; then
+if [[ -z "$LO_IN_APP" ]]; then
+  warn "LibreOffice niet gevonden in dist/PrintScript.app — ondertekening overgeslagen"
+elif ! command -v codesign &>/dev/null; then
+  warn "codesign niet beschikbaar — sla ondertekening over (alleen macOS)"
+else
   # Go up three levels: MacOS/ → Contents/ → LibreOffice/
   LO_BUNDLE_IN_APP="$(dirname "$(dirname "$(dirname "$LO_IN_APP")")")"
-  codesign --force --deep --sign - "$LO_BUNDLE_IN_APP" 2>/dev/null \
-    && ok "Ad-hoc ondertekening klaar: $LO_BUNDLE_IN_APP" \
-    || warn "codesign mislukt — conversie kan falen op macOS"
-else
-  warn "LibreOffice niet gevonden in dist/PrintScript.app — ondertekening overgeslagen"
+  if codesign --force --deep --sign - "$LO_BUNDLE_IN_APP" 2>/dev/null; then
+    ok "Ad-hoc ondertekening klaar"
+  else
+    warn "codesign mislukt — conversie kan falen op macOS"
+  fi
 fi
 
 # ── 9. bundled_libreoffice/ opruimen ─────────────────────────────────────────

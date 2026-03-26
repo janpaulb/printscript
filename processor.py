@@ -470,6 +470,9 @@ def _lo_env(extra: dict | None = None) -> dict:
     if extra:
         env.update(extra)
     return env
+
+
+def _is_display_error(stderr: str) -> bool:
     markers = ('windowing system', 'cannot connect to x', 'no display')
     low = stderr.lower()
     return any(m in low for m in markers)
