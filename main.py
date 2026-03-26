@@ -3,16 +3,11 @@ PrintScript – native macOS app entry point.
 
 Startup sequence
 ────────────────
-1. Apply any staged LibreOffice update (downloaded in a previous session).
-2. Start Flask on a free port in a daemon thread.
-3. Launch a background thread that checks for a newer LibreOffice version
-   and downloads it silently. Status updates are pushed to the UI via a
-   thread-safe queue that the /update-status endpoint drains.
-4. Open a native WKWebView window (pywebview) pointing at localhost.
+1. Start Flask on a free port in a daemon thread.
+2. Open a native WKWebView window (pywebview) pointing at localhost.
 """
 
 import os
-import queue
 import socket
 import sys
 import threading
@@ -46,60 +41,6 @@ def _wait_for_port(port: int, timeout: float = 15.0) -> bool:
         except OSError:
             time.sleep(0.05)
     return False
-
-
-def _remove_lo_quarantine() -> None:
-    """
-    Ensure the bundled LibreOffice can load its VCL plugin dylibs at runtime.
-
-    Two problems can prevent dlopen() from loading libvclplug_svp.dylib:
-
-    1. Quarantine (com.apple.quarantine)
-       When the user installs the app from a downloaded DMG, macOS attaches
-       quarantine to all files inside the bundle.  Quarantined dylibs cannot
-       be loaded via dlopen().  We remove quarantine on every launch (fast,
-       < 1 s) using xattr -cr.
-
-    2. Broken code signature / Library Validation
-       LibreOffice is notarized (Hardened Runtime + Library Validation).
-       PyInstaller copies data files via shutil.copy2() which does NOT preserve
-       extended attributes or embedded code signatures, so the LibreOffice
-       bundle inside the .app may have an invalid/absent signature.
-       Library Validation then blocks every dlopen() call.
-       build_mac.sh already re-signs AFTER PyInstaller, but if the signature
-       is still broken (first install, version update, etc.) we detect and fix
-       it here.
-
-    Performance:
-       codesign --verify is fast (< 1 s).  codesign --force --deep is slow
-       (~60 s for a stripped 300 MB LibreOffice bundle) but only runs ONCE —
-       when the signature is actually broken.  Every subsequent launch the
-       verify step passes and we skip the slow re-sign entirely.
-    """
-    import subprocess as _sp
-
-    lo_dir = _resource_path('LibreOffice')
-    if not os.path.isdir(lo_dir):
-        return  # Not a bundled build (dev run without build_mac.sh)
-
-    # 1. Remove quarantine — always, fast (< 1 s)
-    _sp.run(['xattr', '-cr', lo_dir], check=False, capture_output=True)
-
-    # 2. Check signature — skip the slow re-sign if already valid
-    soffice = os.path.join(lo_dir, 'Contents', 'MacOS', 'soffice')
-    if os.path.isfile(soffice):
-        check = _sp.run(
-            ['codesign', '-v', '--no-strict', soffice],
-            capture_output=True,
-        )
-        if check.returncode == 0:
-            return  # Signature valid — nothing more to do
-
-    # 3. Signature broken or absent — re-sign ad-hoc (runs once, ~60 s)
-    _sp.run(
-        ['codesign', '--force', '--deep', '--sign', '-', lo_dir],
-        check=False, capture_output=True,
-    )
 
 
 def _error_html(message: str) -> str:
@@ -140,57 +81,14 @@ def _error_html(message: str) -> str:
 # Main
 # ---------------------------------------------------------------------------
 
-# Global queue: updater thread pushes dicts; /update-status endpoint drains it
-update_queue: queue.Queue = queue.Queue()
-
-
 def main() -> None:
     import webview  # noqa: PLC0415
 
-    # ── 0. Remove quarantine from bundled LibreOffice (background) ───────────
-    # When the user downloads and installs our DMG, macOS may attach quarantine
-    # extended attributes to all files inside the bundle — including the soffice
-    # binary and its dylibs. Even if removed at build time (build_mac.sh), the
-    # attributes can be re-applied by the OS during DMG extraction or app copy.
-    # A quarantined dylib cannot be loaded by dlopen(), which would cause
-    # "no suitable windowing system found" on the very first conversion.
-    # We also re-sign ad-hoc here if the signature was somehow lost.
-    #
-    # Run in a background thread so the window opens immediately.
-    # xattr -cr is fast (< 1 s); codesign --force --deep is slow (~60 s) but
-    # only runs ONCE when the signature is actually broken (first install).
-    # Subsequent launches just run the fast codesign -v check and return.
-    threading.Thread(target=_remove_lo_quarantine, daemon=True,
-                     name='lo-quarantine-removal').start()
-
-    # ── 1. Apply any pending LibreOffice update ──────────────────────────────
-    try:
-        from updater import apply_staged_update
-        apply_staged_update()
-    except Exception:
-        pass  # Never block startup for an update failure
-
-    # ── 2. Verify LibreOffice is available ───────────────────────────────────
-    try:
-        from processor import _find_libreoffice
-        _find_libreoffice()
-    except RuntimeError as exc:
-        webview.create_window(
-            'PrintScript – Fout',
-            html=_error_html(str(exc)),
-            width=540,
-            height=380,
-            resizable=False,
-        )
-        webview.start()
-        sys.exit(1)
-
-    # ── 3. Start Flask ───────────────────────────────────────────────────────
+    # ── 1. Start Flask ────────────────────────────────────────────────────────
     os.environ['PRINTSCRIPT_BASE_DIR'] = _resource_path('.')
     port = _find_free_port()
 
     from app import app as flask_app  # noqa: PLC0415
-    flask_app.config['UPDATE_QUEUE'] = update_queue
 
     def _run_flask() -> None:
         flask_app.run(
@@ -213,14 +111,7 @@ def main() -> None:
         webview.start()
         sys.exit(1)
 
-    # ── 4. Start background LibreOffice update check ─────────────────────────
-    try:
-        from updater import start_background_check
-        start_background_check(status_callback=update_queue.put)
-    except Exception:
-        pass
-
-    # ── 5. Open the native window ─────────────────────────────────────────────
+    # ── 2. Open the native window ─────────────────────────────────────────────
     webview.create_window(
         'PrintScript',
         url=f'http://127.0.0.1:{port}',

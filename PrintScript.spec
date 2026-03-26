@@ -15,12 +15,8 @@ a = Analysis(
     binaries=[],
     datas=[
         # Web UI assets
-        ('templates',           'templates'),
-        ('static',              'static'),
-        # LibreOffice – downloaded and staged by build_mac.sh
-        # The whole directory is included; soffice lives at
-        #   {MEIPASS}/LibreOffice/Contents/MacOS/soffice
-        ('bundled_libreoffice', 'LibreOffice'),
+        ('templates', 'templates'),
+        ('static',    'static'),
     ],
     hiddenimports=[
         # lxml C extensions are not always auto-detected
@@ -38,6 +34,24 @@ a = Analysis(
         'flask',
         'flask.json.provider',
         'jinja2.ext',
+        # WeasyPrint + mammoth (PDF conversion engine)
+        'weasyprint',
+        'weasyprint.css',
+        'weasyprint.document',
+        'weasyprint.html',
+        'weasyprint.layout',
+        'weasyprint.svg',
+        'weasyprint.text.ffi',
+        'pydyf',
+        'mammoth',
+        'mammoth.conversion',
+        'mammoth.images',
+        'tinycss2',
+        'cssselect2',
+        'html5lib',
+        'fonttools',
+        'Pillow',
+        'PIL._imaging',
     ],
     hookspath=[],
     hooksconfig={},
@@ -48,7 +62,6 @@ a = Analysis(
         'matplotlib',
         'numpy',
         'pandas',
-        'PIL',
         'pytest',
         # Server-only — not used in the native macOS app
         'gunicorn',
@@ -101,9 +114,7 @@ app = BUNDLE(
         'CFBundleShortVersionString': '1.0.0',
         'CFBundleVersion':          '1',
         'NSHighResolutionCapable':  True,
-        # Laat de app gewoon in het Dock verschijnen (geen menu-bar-only app)
         'LSUIElement':              False,
-        # Toestemming voor bestandstoegang (drag-and-drop uploads)
         'NSDocumentsFolderUsageDescription': 'PrintScript leest Word-documenten.',
         'NSDesktopFolderUsageDescription':   'PrintScript leest Word-documenten.',
     },

@@ -20,10 +20,8 @@ jobs:
         include:
           - runner: macos-14   # Apple Silicon (arm64)
             arch:   arm64
-            lo_arch: aarch64
           - runner: macos-13   # Intel (x86_64)
             arch:   x86_64
-            lo_arch: x86_64
 
     steps:
       # ── Broncode ophalen ────────────────────────────────────────────────────
@@ -33,25 +31,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      # ── LibreOffice-versie opzoeken (voor de cache-sleutel) ─────────────────
-      - name: Nieuwste LibreOffice-versie opzoeken
-        id: lo_version
-        run: |
-          LO_INDEX="https://download.documentfoundation.org/libreoffice/stable/"
-          VERSION=$(curl -s "$LO_INDEX" \
-            | grep -oE '[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?' \
-            | sort -t. -k1,1n -k2,2n -k3,3n -k4,4n \
-            | tail -1)
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "Nieuwste versie: $VERSION"
-
-      # ── LibreOffice-DMG cachen (~400 MB, vermijdt herhaalde downloads) ───────
-      - name: LibreOffice-DMG cachen
-        uses: actions/cache@v4
-        with:
-          path: /tmp/LibreOffice_*.dmg
-          key: lo-${{ matrix.runner }}-${{ matrix.lo_arch }}-${{ steps.lo_version.outputs.version }}
 
       # ── App bouwen ──────────────────────────────────────────────────────────
       - name: PrintScript.app bouwen

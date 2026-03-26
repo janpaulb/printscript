@@ -10,5 +10,3 @@ __pycache__/
 build/
 dist/
 
-# LibreOffice embedded during build (recreated by build_mac.sh)
-bundled_libreoffice/

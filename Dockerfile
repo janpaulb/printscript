@@ -29,7 +29,7 @@ COPY --from=deps /usr/local/lib/python3.11/site-packages \
 COPY --from=deps /usr/local/bin /usr/local/bin
 
 # Copy application source
-COPY app.py processor.py gdocs.py updater.py ./
+COPY app.py processor.py gdocs.py ./
 COPY templates/ templates/
 COPY static/    static/
 

@@ -11,4 +11,4 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s   # give gunicorn + LibreOffice bootstrap time to start
+      start_period: 20s   # give gunicorn time to start

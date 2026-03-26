@@ -13,8 +13,8 @@ import multiprocessing
 bind    = "0.0.0.0:5000"
 
 # ── Workers ────────────────────────────────────────────────────────────────────
-# LibreOffice conversions are CPU-bound and each worker uses a unique profile
-# dir, so multiple workers run safely in parallel.
+# WeasyPrint + mammoth conversions are CPU-bound; multiple workers run safely
+# in parallel since there are no shared external processes or profile dirs.
 workers     = multiprocessing.cpu_count()
 worker_class = "sync"
 

@@ -6,7 +6,6 @@ Flask web application entry point.
 import io
 import logging
 import os
-import queue
 import re
 import shutil
 import sys
@@ -156,50 +155,8 @@ def convert_url():
     return response
 
 
-@app.route('/update-status')
-def update_status():
-    """
-    Drain the update queue and return the latest status to the UI.
-    Called by the frontend every few seconds via polling.
-    Falls back to the persisted state file when the queue is empty.
-    """
-    q = app.config.get('UPDATE_QUEUE')
-    latest = None
-    if q:
-        while True:
-            try:
-                latest = q.get_nowait()
-            except queue.Empty:
-                break
-
-    if latest:
-        return jsonify(latest)
-
-    # No live update in queue — return persisted state
-    try:
-        from updater import _load_state, get_active_version
-        state = _load_state()
-        if state.get('update_ready'):
-            return jsonify({
-                'status':  'ready',
-                'version': state.get('staged_version', ''),
-            })
-        return jsonify({
-            'status':  'idle',
-            'version': get_active_version(),
-        })
-    except Exception:
-        return jsonify({'status': 'idle'})
-
-
 if __name__ == '__main__':
     import logging
     logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
-
-    # Ensure LibreOffice can run headlessly before accepting requests.
-    # On Linux this auto-installs libreoffice-headless or xvfb if needed.
-    from processor import bootstrap_headless_libreoffice
-    bootstrap_headless_libreoffice()
-
     port = int(os.environ.get('PORT', 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
