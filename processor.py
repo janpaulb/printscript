@@ -438,7 +438,38 @@ def _lo_cmd(binary: str, profile_dir: str, output_dir: str, docx_path: str) -> l
     ]
 
 
-def _is_display_error(stderr: str) -> bool:
+def _lo_env(extra: dict | None = None) -> dict:
+    """
+    Build a clean environment for the LibreOffice subprocess.
+
+    The critical problem on macOS inside a PyInstaller-frozen app:
+    PyInstaller injects DYLD_LIBRARY_PATH (and related DYLD_* vars) pointing
+    to its _MEIPASS extraction directory so the frozen Python host finds its
+    own bundled dylibs.  LibreOffice inherits this environment as a subprocess.
+    When LibreOffice calls dlopen() to load its VCL plugin (libvclplug_svp.dylib)
+    the dynamic linker starts its search in _MEIPASS — where it finds
+    incompatible versions of system frameworks — and the load fails with
+    "no suitable windowing system found, exiting".
+
+    Fix: strip every DYLD_* variable that PyInstaller may have set before
+    handing the environment to LibreOffice.  This is safe because LibreOffice
+    uses @rpath / @executable_path (baked into the binary at link time) to
+    find its own frameworks, so it does not need DYLD_LIBRARY_PATH.
+    """
+    env = os.environ.copy()
+    for var in (
+        'DYLD_LIBRARY_PATH',
+        'DYLD_FRAMEWORK_PATH',
+        'DYLD_FALLBACK_LIBRARY_PATH',
+        'DYLD_INSERT_LIBRARIES',
+        # PyInstaller also sets these; they should not reach LibreOffice
+        'PYTHONPATH',
+        'PYTHONHOME',
+    ):
+        env.pop(var, None)
+    if extra:
+        env.update(extra)
+    return env
     markers = ('windowing system', 'cannot connect to x', 'no display')
     low = stderr.lower()
     return any(m in low for m in markers)
@@ -450,19 +481,22 @@ def convert_to_pdf(docx_path: str, output_dir: str) -> str:
 
     Platform strategy
     ─────────────────
-    macOS
-        LibreOffice uses its native (Aqua) renderer.  The --headless flag alone
-        is enough — no DISPLAY variable exists on macOS and SAL_USE_VCLPLUGIN
-        must NOT be set (the svp plugin is Linux-only; forcing it causes the
-        very "no windowing system" error we are trying to avoid).
+    macOS (PyInstaller frozen app)
+        The svp VCL plugin ships with the macOS LibreOffice DMG and is the
+        correct headless renderer.  However, PyInstaller injects DYLD_LIBRARY_PATH
+        into the process environment so its frozen Python host finds its dylibs.
+        LibreOffice inherits this as a subprocess: dlopen() for libvclplug_svp.dylib
+        starts searching _MEIPASS, finds incompatible system frameworks, and
+        fails with "no suitable windowing system found".
+        Fix: _lo_env() scrubs all DYLD_* loader overrides before exec.
+        Attempt 1 — SAL_USE_VCLPLUGIN=svp + clean env  (preferred)
+        Attempt 2 — bare --headless (Aqua fallback for older LO builds)
 
-    Linux (and everything else)
+    Linux
         Attempt 1 — SAL_USE_VCLPLUGIN=svp
-            Software renderer shipped with libreoffice-headless.  Fastest and
-            most reliable; no X11 server needed.
+            Software renderer shipped with libreoffice-headless.
         Attempt 2 — xvfb-run
-            Virtual X11 framebuffer.  Fallback for distros where
-            libreoffice-headless is not (yet) installed.
+            Virtual X11 framebuffer fallback.
 
     Each call gets an isolated LibreOffice user profile so concurrent
     conversions do not clash on the shared default profile directory.
@@ -474,26 +508,40 @@ def convert_to_pdf(docx_path: str, output_dir: str) -> str:
     cmd    = _lo_cmd(binary, profile_dir, output_dir, docx_path)
 
     if sys.platform == 'darwin':
-        # ── macOS: native renderer, --headless flag alone is sufficient ──────
+        # ── macOS Attempt 1: SAL_USE_VCLPLUGIN=svp + clean env ───────────────
+        # The svp (software VCL) plugin ships with the macOS LibreOffice DMG
+        # and is the correct headless backend.  We MUST scrub DYLD_* loader
+        # variables that PyInstaller injects, otherwise LibreOffice's dlopen()
+        # resolves the plugin against the wrong _MEIPASS dylibs and crashes.
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=120,
-            env=os.environ.copy(),
+            env=_lo_env({'SAL_USE_VCLPLUGIN': 'svp'}),
         )
+
+        # ── macOS Attempt 2: bare --headless (Aqua renderer fallback) ─────────
+        # Some macOS LibreOffice builds (older or custom) don't ship the svp
+        # dylib.  In that case, try without the plugin hint — --headless alone
+        # is enough on recent LO versions.
+        if result.returncode != 0 and _is_display_error(result.stderr):
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=120,
+                env=_lo_env(),
+            )
+
     else:
-        # ── Linux: Attempt 1 — SAL_USE_VCLPLUGIN=svp ─────────────────────────
-        env = os.environ.copy()
-        env['SAL_USE_VCLPLUGIN'] = 'svp'
+        # ── Linux Attempt 1: SAL_USE_VCLPLUGIN=svp ───────────────────────────
+        env = _lo_env({'SAL_USE_VCLPLUGIN': 'svp'})
         env.pop('DISPLAY', None)
         env.pop('WAYLAND_DISPLAY', None)
 
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
 
-        # ── Linux: Attempt 2 — xvfb-run (virtual X11 framebuffer) ───────────
+        # ── Linux Attempt 2: xvfb-run (virtual X11 framebuffer) ──────────────
         # Fallback when libreoffice-headless (svp plugin) is not installed.
         if result.returncode != 0 and _is_display_error(result.stderr):
             xvfb = shutil.which('xvfb-run')
             if xvfb:
-                env2 = os.environ.copy()
+                env2 = _lo_env()
                 env2.pop('DISPLAY', None)
                 env2.pop('WAYLAND_DISPLAY', None)
                 result = subprocess.run(
