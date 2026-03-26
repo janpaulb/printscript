@@ -50,38 +50,52 @@ def _wait_for_port(port: int, timeout: float = 15.0) -> bool:
 
 def _remove_lo_quarantine() -> None:
     """
-    Strip macOS quarantine attributes and re-apply ad-hoc code signature on
-    the bundled LibreOffice directory at every app start.
+    Ensure the bundled LibreOffice can load its VCL plugin dylibs at runtime.
 
-    Why this is needed at runtime (not just at build time):
-      • When the user installs the app from a downloaded DMG, macOS re-attaches
-        com.apple.quarantine to the .app bundle's contents.
-      • Quarantined dylibs cannot be loaded via dlopen() — LibreOffice's VCL
-        plugin loader would fail with "no suitable windowing system found".
-      • build_mac.sh removes quarantine before PyInstaller runs, but the DMG
-        download re-introduces it when the user installs the app.
+    Two problems can prevent dlopen() from loading libvclplug_svp.dylib:
 
-    Ad-hoc re-signing is also attempted:
-      • Stripping the bundle (removing gallery/, template/ etc.) breaks
-        LibreOffice's original notarized code signature.
-      • Library Validation (part of Hardened Runtime) would then block the
-        VCL plugin dlopen() even without quarantine.
-      • codesign --force --deep --sign - replaces the broken signature and
-        disables Library Validation for this local copy.
+    1. Quarantine (com.apple.quarantine)
+       When the user installs the app from a downloaded DMG, macOS attaches
+       quarantine to all files inside the bundle.  Quarantined dylibs cannot
+       be loaded via dlopen().  We remove quarantine on every launch (fast,
+       < 1 s) using xattr -cr.
 
-    Both operations are fast (< 1 s on the already-extracted bundle), silent
-    on failure, and safe to repeat on every launch.
+    2. Broken code signature / Library Validation
+       LibreOffice is notarized (Hardened Runtime + Library Validation).
+       PyInstaller copies data files via shutil.copy2() which does NOT preserve
+       extended attributes or embedded code signatures, so the LibreOffice
+       bundle inside the .app may have an invalid/absent signature.
+       Library Validation then blocks every dlopen() call.
+       build_mac.sh already re-signs AFTER PyInstaller, but if the signature
+       is still broken (first install, version update, etc.) we detect and fix
+       it here.
+
+    Performance:
+       codesign --verify is fast (< 1 s).  codesign --force --deep is slow
+       (~60 s for a stripped 300 MB LibreOffice bundle) but only runs ONCE —
+       when the signature is actually broken.  Every subsequent launch the
+       verify step passes and we skip the slow re-sign entirely.
     """
     import subprocess as _sp
 
     lo_dir = _resource_path('LibreOffice')
     if not os.path.isdir(lo_dir):
-        return  # Not a bundled build (e.g. dev run without build_mac.sh)
+        return  # Not a bundled build (dev run without build_mac.sh)
 
-    # 1. Remove quarantine
+    # 1. Remove quarantine — always, fast (< 1 s)
     _sp.run(['xattr', '-cr', lo_dir], check=False, capture_output=True)
 
-    # 2. Ad-hoc re-sign to neutralise Library Validation
+    # 2. Check signature — skip the slow re-sign if already valid
+    soffice = os.path.join(lo_dir, 'Contents', 'MacOS', 'soffice')
+    if os.path.isfile(soffice):
+        check = _sp.run(
+            ['codesign', '-v', '--no-strict', soffice],
+            capture_output=True,
+        )
+        if check.returncode == 0:
+            return  # Signature valid — nothing more to do
+
+    # 3. Signature broken or absent — re-sign ad-hoc (runs once, ~60 s)
     _sp.run(
         ['codesign', '--force', '--deep', '--sign', '-', lo_dir],
         check=False, capture_output=True,

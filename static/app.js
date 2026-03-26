@@ -185,6 +185,10 @@ function pollUpdateStatus() {
           showUpdateBanner('downloading', '↻', `LibreOffice ${data.version} installeren\u2026`);
           break;
         }
+        case 'signing': {
+          showUpdateBanner('downloading', '↻', `LibreOffice ${data.version} ondertekenen\u2026`);
+          break;
+        }
         case 'ready': {
           showUpdateBanner('ready', '✓',
             `LibreOffice ${data.version} klaar \u2014 herstart om bij te werken`);

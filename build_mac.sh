@@ -127,24 +127,6 @@ ok "LibreOffice gestript: ${STRIPPED_SIZE}"
 # Verwijder quarantine-attribuut zodat de binary uitvoerbaar is
 xattr -cr "$BUNDLE_DIR" 2>/dev/null || true
 
-# ── Ad-hoc code-signing na het strippen ───────────────────────────────────────
-# KRITISCH: stripping verwijdert bestanden uit de LibreOffice-bundle, waardoor
-# de originele code-signature van The Document Foundation ongeldig wordt.
-# LibreOffice is notarized (Hardened Runtime + Library Validation). Wanneer
-# de soffice-binary vervolgens dlopen() aanroept voor libvclplug_svp.dylib,
-# controleert macOS of de bundle-signature geldig is — dat is hij niet meer →
-# dlopen geblokkeerd → "no suitable windowing system found, exiting".
-#
-# Oplossing: ad-hoc re-signing. De '-' (min) als identity is de macOS
-# standaard voor lokaal ondertekenen zonder Apple-certificaat. Dit:
-#   1. Ondertekent alle executables en dylibs opnieuw (--deep)
-#   2. Maakt Library Validation inactief voor deze kopie
-#   3. Laat dlopen() de VCL-plugin gewoon laden
-echo "   LibreOffice bundle ad-hoc ondertekenen…"
-codesign --force --deep --sign - "$BUNDLE_DIR" 2>/dev/null \
-  && ok "Ad-hoc ondertekening klaar" \
-  || warn "codesign niet beschikbaar — conversie kan mislukken op macOS"
-
 # Versie-markering opslaan (gebruikt door updater.py)
 echo "$LO_VERSION" > "$BUNDLE_DIR/lo_version.txt"
 ok "LibreOffice $LO_VERSION klaar in bundled_libreoffice/"
@@ -158,6 +140,36 @@ ok "Opgeruimd"
 step "App bouwen met PyInstaller (1–3 minuten)"
 $PYTHON -m PyInstaller PrintScript.spec --noconfirm
 ok "Build geslaagd"
+
+# ── 8b. LibreOffice in de .app ad-hoc ondertekenen ────────────────────────────
+# KRITISCH — moet NA PyInstaller, niet ervoor.
+#
+# PyInstaller kopieert alle data-bestanden naar de .app via shutil.copy2().
+# Dit behoudt bestandsinhoud en permissies, maar GEEN extended attributes en
+# mogelijk GEEN embedded code-signatures.
+# Resultaat: de LibreOffice-bundle in de .app heeft een gebroken of ontbrekende
+# signature, ook al was bundled_libreoffice/ al correct ondertekend.
+#
+# Waarom dit LibreOffice kapot maakt:
+#   LibreOffice is notarized (Hardened Runtime + Library Validation). Wanneer
+#   soffice via dlopen() libvclplug_svp.dylib probeert te laden, controleert
+#   macOS de bundle-signature. Gebroken → dlopen geblokkeerd →
+#   "no suitable windowing system found, exiting".
+#
+# Oplossing: ad-hoc re-signing op de definitieve locatie in de .app.
+# PyInstaller 5 plaatst data in Contents/MacOS/, PyInstaller 6+ in _internal/.
+step "LibreOffice in .app ad-hoc ondertekenen"
+LO_IN_APP=$(find "dist/PrintScript.app" \
+  -path "*/LibreOffice/Contents/MacOS/soffice" -type f 2>/dev/null | head -1)
+if [[ -n "$LO_IN_APP" ]]; then
+  # Go up three levels: MacOS/ → Contents/ → LibreOffice/
+  LO_BUNDLE_IN_APP="$(dirname "$(dirname "$(dirname "$LO_IN_APP")")")"
+  codesign --force --deep --sign - "$LO_BUNDLE_IN_APP" 2>/dev/null \
+    && ok "Ad-hoc ondertekening klaar: $LO_BUNDLE_IN_APP" \
+    || warn "codesign mislukt — conversie kan falen op macOS"
+else
+  warn "LibreOffice niet gevonden in dist/PrintScript.app — ondertekening overgeslagen"
+fi
 
 # ── 9. bundled_libreoffice/ opruimen ─────────────────────────────────────────
 step "Tijdelijke bestanden opruimen"

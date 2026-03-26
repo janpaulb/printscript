@@ -307,6 +307,7 @@ def _download_and_stage(url: str, version: str, progress_cb) -> None:
             # block dlopen() for the VCL plugin → "no suitable windowing
             # system". Ad-hoc signing replaces the broken signature and
             # disables Library Validation for this local copy.
+            _notify(progress_cb, {'status': 'signing', 'version': version})
             subprocess.run(
                 ['codesign', '--force', '--deep', '--sign', '-', str(STAGED_DIR)],
                 check=False, capture_output=True,
