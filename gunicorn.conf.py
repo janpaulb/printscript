@@ -29,20 +29,6 @@ errorlog   = "-"   # stderr
 loglevel   = "info"
 
 # ── Recycling ──────────────────────────────────────────────────────────────────
-# Recycle workers after N requests to prevent memory accumulation from
-# very large LibreOffice profile dirs.
-max_requests      = 500
+# Recycle workers after N requests to prevent slow memory growth.
+max_requests        = 500
 max_requests_jitter = 50
-
-
-def on_starting(server):
-    """
-    Called once in the master process before any workers are forked.
-    Installing libreoffice-headless here means workers inherit the result
-    immediately — no concurrent apt-get calls, no per-worker overhead.
-    """
-    try:
-        from processor import bootstrap_headless_libreoffice
-        bootstrap_headless_libreoffice()
-    except Exception:
-        pass

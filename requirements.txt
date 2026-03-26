@@ -5,5 +5,9 @@ lxml>=5.0
 requests>=2.28
 gunicorn>=21.2      # production WSGI server (Linux/macOS)
 
-# System dependency (install separately):
+# PDF conversion — pure-Python, no display / VCL / LibreOffice process needed
+mammoth>=1.6        # DOCX → HTML (preserves paragraphs, tables, styles)
+weasyprint>=61.0    # HTML → PDF  (pydyf backend, no Cairo/Gtk/X11 required)
+
+# LibreOffice is kept as an optional last-resort fallback (not required):
 #   apt-get install libreoffice-writer libreoffice-headless

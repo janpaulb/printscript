@@ -492,31 +492,118 @@ def _is_display_error(stderr: str) -> bool:
     return any(m in low for m in markers)
 
 
-def convert_to_pdf(docx_path: str, output_dir: str) -> str:
+def _validate_pdf(pdf_path: str, source: str = '') -> None:
+    """Raise RuntimeError if pdf_path is missing, too small, or has no %PDF header."""
+    if not os.path.exists(pdf_path):
+        raise RuntimeError(f'{source}Geen PDF gegenereerd op het verwachte pad.')
+    size = os.path.getsize(pdf_path)
+    if size < 1024:
+        raise RuntimeError(f'{source}Ongeldig PDF-bestand ({size} bytes).')
+    with open(pdf_path, 'rb') as f:
+        if f.read(4) != b'%PDF':
+            raise RuntimeError(f'{source}Beschadigd PDF-bestand (ongeldige header).')
+
+
+def _convert_with_weasyprint(docx_path: str, output_dir: str) -> str:
     """
-    Convert a .docx file to PDF using LibreOffice headless.
+    Convert DOCX → PDF using mammoth (DOCX→HTML) + WeasyPrint (HTML→PDF).
 
-    Platform strategy
-    ─────────────────
-    macOS (PyInstaller frozen app)
-        The svp VCL plugin ships with the macOS LibreOffice DMG and is the
-        correct headless renderer.  However, PyInstaller injects DYLD_LIBRARY_PATH
-        into the process environment so its frozen Python host finds its dylibs.
-        LibreOffice inherits this as a subprocess: dlopen() for libvclplug_svp.dylib
-        starts searching _MEIPASS, finds incompatible system frameworks, and
-        fails with "no suitable windowing system found".
-        Fix: _lo_env() scrubs all DYLD_* loader overrides before exec.
-        Attempt 1 — SAL_USE_VCLPLUGIN=svp + clean env  (preferred)
-        Attempt 2 — bare --headless (Aqua fallback for older LO builds)
+    Completely pure Python — no external processes, no display, no VCL plugins.
+    Works headlessly on macOS (PyInstaller frozen app) and Linux (Docker).
+    Requires: pip install mammoth weasyprint
+    """
+    import base64 as _b64
 
-    Linux
-        Attempt 1 — SAL_USE_VCLPLUGIN=svp
-            Software renderer shipped with libreoffice-headless.
-        Attempt 2 — xvfb-run
-            Virtual X11 framebuffer fallback.
+    import mammoth          # type: ignore
+    import weasyprint       # type: ignore
 
-    Each call gets an isolated LibreOffice user profile so concurrent
-    conversions do not clash on the shared default profile directory.
+    base     = os.path.splitext(os.path.basename(docx_path))[0]
+    pdf_path = os.path.join(output_dir, base + '.pdf')
+
+    # ── Extract header / footer text via python-docx ─────────────────────────
+    header_html = footer_html = ''
+    try:
+        _doc = Document(docx_path)
+        for _sec in _doc.sections:
+            if _sec.header and not _sec.header.is_linked_to_previous:
+                _ht = '\n'.join(p.text for p in _sec.header.paragraphs if p.text.strip())
+                if _ht:
+                    header_html = f'<div class="doc-header">{_ht}</div>'
+            if _sec.footer and not _sec.footer.is_linked_to_previous:
+                _ft = '\n'.join(p.text for p in _sec.footer.paragraphs if p.text.strip())
+                if _ft:
+                    footer_html = f'<div class="doc-footer">{_ft}</div>'
+            break  # first section only
+    except Exception:
+        pass  # best-effort; missing header/footer is acceptable
+
+    # ── DOCX body → HTML via mammoth ─────────────────────────────────────────
+    def _embed_image(image):
+        with image.open() as f:
+            data = _b64.b64encode(f.read()).decode()
+        return {'src': f'data:{image.content_type};base64,{data}'}
+
+    with open(docx_path, 'rb') as f:
+        _result = mammoth.convert_to_html(
+            f,
+            convert_image=mammoth.images.img_element(_embed_image),
+        )
+    body_html = _result.value
+
+    # ── Minimal A4 stylesheet ─────────────────────────────────────────────────
+    css = """
+        @page { size: A4; margin: 2.5cm; }
+        body {
+            font-family: Arial, "Liberation Sans", sans-serif;
+            font-size: 11pt;
+            line-height: 1.4;
+            color: #000;
+            margin: 0;
+        }
+        p                 { margin: 0 0 6pt 0; }
+        h1                { font-size: 16pt; font-weight: bold; margin: 12pt 0 6pt; }
+        h2                { font-size: 14pt; font-weight: bold; margin: 10pt 0 6pt; }
+        h3                { font-size: 12pt; font-weight: bold; margin:  8pt 0 4pt; }
+        h4, h5, h6        { font-size: 11pt; font-weight: bold; margin:  6pt 0 3pt; }
+        table             { border-collapse: collapse; width: 100%; margin: 6pt 0; }
+        td, th            { border: 1px solid #ccc; padding: 3pt 5pt; font-size: 10pt; }
+        img               { max-width: 100%; height: auto; }
+        ol, ul            { margin: 0 0 6pt; padding-left: 20pt; }
+        li                { margin-bottom: 2pt; }
+        .doc-header {
+            font-size: 9pt; color: #555;
+            border-bottom: 1px solid #ccc;
+            padding-bottom: 4pt; margin-bottom: 12pt;
+        }
+        .doc-footer {
+            font-size: 9pt; color: #555;
+            border-top: 1px solid #ccc;
+            padding-top: 4pt; margin-top: 12pt;
+        }
+    """
+
+    html = (
+        '<!DOCTYPE html><html lang="nl"><head>'
+        '<meta charset="utf-8">'
+        f'<style>{css}</style>'
+        '</head><body>'
+        f'{header_html}{body_html}{footer_html}'
+        '</body></html>'
+    )
+
+    # ── HTML → PDF via WeasyPrint ─────────────────────────────────────────────
+    weasyprint.HTML(string=html, base_url=output_dir).write_pdf(pdf_path)
+    _validate_pdf(pdf_path, 'WeasyPrint: ')
+    return pdf_path
+
+
+def _convert_with_libreoffice(docx_path: str, output_dir: str) -> str:
+    """
+    Convert DOCX → PDF via LibreOffice headless subprocess.
+
+    Highest layout fidelity but requires LibreOffice to be installed and a
+    working VCL display plugin (SAL_USE_VCLPLUGIN=svp or xvfb on Linux).
+    Used as a fallback when WeasyPrint is unavailable.
     """
     profile_dir = os.path.join(output_dir, f'lo_profile_{uuid.uuid4().hex}')
     os.makedirs(profile_dir, exist_ok=True)
@@ -525,36 +612,21 @@ def convert_to_pdf(docx_path: str, output_dir: str) -> str:
     cmd    = _lo_cmd(binary, profile_dir, output_dir, docx_path)
 
     if sys.platform == 'darwin':
-        # ── macOS Attempt 1: SAL_USE_VCLPLUGIN=svp + clean env ───────────────
-        # The svp (software VCL) plugin ships with the macOS LibreOffice DMG
-        # and is the correct headless backend.  We MUST scrub DYLD_* loader
-        # variables that PyInstaller injects, otherwise LibreOffice's dlopen()
-        # resolves the plugin against the wrong _MEIPASS dylibs and crashes.
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=120,
             env=_lo_env({'SAL_USE_VCLPLUGIN': 'svp'}),
         )
-
-        # ── macOS Attempt 2: bare --headless (Aqua renderer fallback) ─────────
-        # Some macOS LibreOffice builds (older or custom) don't ship the svp
-        # dylib.  In that case, try without the plugin hint — --headless alone
-        # is enough on recent LO versions.
         if result.returncode != 0 and _is_display_error(result.stderr):
             result = subprocess.run(
                 cmd, capture_output=True, text=True, timeout=120,
                 env=_lo_env(),
             )
-
     else:
-        # ── Linux Attempt 1: SAL_USE_VCLPLUGIN=svp ───────────────────────────
         env = _lo_env({'SAL_USE_VCLPLUGIN': 'svp'})
         env.pop('DISPLAY', None)
         env.pop('WAYLAND_DISPLAY', None)
-
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
 
-        # ── Linux Attempt 2: xvfb-run (virtual X11 framebuffer) ──────────────
-        # Fallback when libreoffice-headless (svp plugin) is not installed.
         if result.returncode != 0 and _is_display_error(result.stderr):
             xvfb = shutil.which('xvfb-run')
             if xvfb:
@@ -567,46 +639,44 @@ def convert_to_pdf(docx_path: str, output_dir: str) -> str:
                 )
 
     if result.returncode != 0:
-        # Always log the raw LibreOffice output so server admins can diagnose
         log.error(
             'LibreOffice conversion failed (rc=%d)\nSTDOUT: %s\nSTDERR: %s',
             result.returncode, result.stdout.strip(), result.stderr.strip(),
         )
-        if _is_display_error(result.stderr):
-            raise RuntimeError(
-                'LibreOffice kan geen display vinden.\n'
-                'Installeer één van de volgende pakketten en start opnieuw:\n'
-                '  sudo apt-get install libreoffice-headless\n'
-                '  of: sudo apt-get install xvfb\n\n'
-                f'LibreOffice foutmelding:\n{result.stderr.strip()}'
-            )
         raise RuntimeError(
-            f'PDF-conversie mislukt (LibreOffice rc={result.returncode}):\n'
-            f'{result.stderr}'
+            f'LibreOffice-conversie mislukt (rc={result.returncode}):\n'
+            f'{result.stderr.strip()}'
         )
 
-    base = os.path.splitext(os.path.basename(docx_path))[0]
+    base     = os.path.splitext(os.path.basename(docx_path))[0]
     pdf_path = os.path.join(output_dir, base + '.pdf')
-    if not os.path.exists(pdf_path):
-        raise RuntimeError(
-            f'LibreOffice produceerde geen PDF op het verwachte pad.\n'
-            f'stdout: {result.stdout}\nstderr: {result.stderr}'
-        )
-    # Validate the PDF is not empty or truncated
-    pdf_size = os.path.getsize(pdf_path)
-    if pdf_size < 1024:
-        raise RuntimeError(
-            f'LibreOffice produceerde een ongeldig PDF-bestand ({pdf_size} bytes).\n'
-            f'stdout: {result.stdout}\nstderr: {result.stderr}'
-        )
-    with open(pdf_path, 'rb') as _f:
-        magic = _f.read(4)
-    if magic != b'%PDF':
-        raise RuntimeError(
-            f'LibreOffice produceerde een beschadigd PDF-bestand (ongeldige header).\n'
-            f'stdout: {result.stdout}\nstderr: {result.stderr}'
-        )
+    _validate_pdf(pdf_path, 'LibreOffice: ')
     return pdf_path
+
+
+def convert_to_pdf(docx_path: str, output_dir: str) -> str:
+    """
+    Convert a .docx file to PDF.
+
+    Strategy
+    ────────
+    1. WeasyPrint + mammoth  (primary)
+       Pure Python — no external process, no display, no VCL plugin.
+       Works headlessly on macOS (frozen .app) and Linux (Docker).
+
+    2. LibreOffice headless  (fallback)
+       Higher layout fidelity but requires LibreOffice to be installed
+       with a working VCL plugin (SAL_USE_VCLPLUGIN=svp or xvfb).
+       Only used when mammoth/weasyprint are not installed.
+    """
+    try:
+        return _convert_with_weasyprint(docx_path, output_dir)
+    except ImportError:
+        log.info('mammoth/weasyprint niet beschikbaar, val terug op LibreOffice')
+    except Exception as exc:
+        log.warning('WeasyPrint-conversie mislukt (%s), val terug op LibreOffice', exc)
+
+    return _convert_with_libreoffice(docx_path, output_dir)
 
 
 # ---------------------------------------------------------------------------

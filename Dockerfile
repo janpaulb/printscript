@@ -9,43 +9,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 # ── Stage 2: Runtime image ─────────────────────────────────────────────────────
 FROM python:3.11-slim
 
-# Install LibreOffice and immediately strip everything that is only needed
-# for an interactive GUI session. This keeps the image as small as possible.
+# PDF conversion is handled by WeasyPrint + mammoth (pure Python, no display
+# or VCL plugin required). We only need system fonts for proper rendering.
 #
-# All cleanup happens in a single RUN so Docker commits one thin layer,
-# not the bloated intermediate state before cleanup.
-#
-# What we keep:
-#   libreoffice-writer    – Writer application + OOXML filters
-#   libreoffice-headless  – svp VCL renderer (no display needed)
-#   fonts-liberation      – metric-compatible Arial/Times/Courier clones
-#                           (prevents text reflow vs. the original .docx)
-#
-# What we remove (~180–220 MB):
-#   images_*.zip          – icon themes (6–8 zips × ~15–25 MB each)
-#   gallery/              – clipart library (~50 MB)
-#   template/             – document templates
-#   autocorr/             – autocorrect dictionaries
-#   extensions/           – optional LO extensions
-#   basic/ wizards/       – Basic IDE and wizard scripts
-#   program/classes/      – Java .jar files (Java not needed for conversion)
-#   /usr/share/doc/lo*    – upstream documentation
+#   fonts-liberation  — metric-compatible Arial/Times/Courier clones
+#                       prevents text reflow vs. the original .docx
+#   fonts-noto        — broad Unicode coverage for non-Latin documents
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        libreoffice-writer \
-        libreoffice-headless \
         fonts-liberation \
- && find /usr/lib/libreoffice/share/config -name 'images_*.zip' -delete 2>/dev/null || true \
- && rm -rf \
-        /usr/lib/libreoffice/share/gallery \
-        /usr/lib/libreoffice/share/template \
-        /usr/lib/libreoffice/share/autocorr \
-        /usr/lib/libreoffice/share/extensions \
-        /usr/lib/libreoffice/share/basic \
-        /usr/lib/libreoffice/share/wizards \
-        /usr/lib/libreoffice/program/classes \
-        /usr/share/doc/libreoffice* \
-        /var/lib/apt/lists/*
+        fonts-noto \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -59,34 +33,31 @@ COPY app.py processor.py gdocs.py updater.py ./
 COPY templates/ templates/
 COPY static/    static/
 
-# Non-root user — LibreOffice should not run as root
+# Non-root user
 RUN useradd -m -u 1001 printscript \
  && chown -R printscript:printscript /app
 USER printscript
 
 EXPOSE 5000
 
-# Verify LibreOffice headless works at build time by doing a real conversion
-# (not --version, which skips VCL init and always returns 0 even when broken).
+# Verify WeasyPrint conversion works at build time
 RUN python3 -c "
-import subprocess, tempfile, os, sys
-with tempfile.NamedTemporaryFile(suffix='.txt', delete=False, mode='w') as f:
-    f.write('build test')
-    src = f.name
-env = {**os.environ, 'SAL_USE_VCLPLUGIN': 'svp'}
-env.pop('DISPLAY', None); env.pop('WAYLAND_DISPLAY', None)
-r = subprocess.run(
-    ['libreoffice','--headless','--norestore','--nofirststartwizard',
-     '--convert-to','pdf','--outdir','/tmp', src],
-    capture_output=True, text=True, timeout=60, env=env)
-if r.returncode != 0:
-    print('STDOUT:', r.stdout, file=sys.stderr)
-    print('STDERR:', r.stderr, file=sys.stderr)
-    sys.exit(1)
-print('LibreOffice headless VCL test: OK')
+import tempfile, os, sys
+sys.path.insert(0, '/app')
+import processor
+
+with tempfile.TemporaryDirectory() as d:
+    # Create a minimal DOCX via python-docx
+    from docx import Document
+    doc = Document()
+    doc.add_paragraph('build test')
+    src = os.path.join(d, 'test.docx')
+    doc.save(src)
+    pdf = processor._convert_with_weasyprint(src, d)
+    assert os.path.exists(pdf) and os.path.getsize(pdf) > 1024, 'PDF too small or missing'
+    print('WeasyPrint conversion test: OK', flush=True)
 "
 
 # gunicorn handles graceful shutdown, worker recycling and multi-core use.
-# bootstrap_headless_libreoffice() is called once in the master process via on_starting.
 COPY gunicorn.conf.py .
 CMD ["gunicorn", "--config", "gunicorn.conf.py", "app:app"]
