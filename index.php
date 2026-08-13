@@ -24,9 +24,15 @@ if (!is_file($autoload)) {
     http_response_code(500);
     header('Content-Type: text/plain; charset=utf-8');
     exit(
-        "De map vendor/ ontbreekt.\n\n"
-        . "Heb je de losse bestanden geupload in plaats van het uitrolpakket?\n"
-        . "Download printscript-php.zip bij de releases, of draai:  composer install\n"
+        "PrintScript is niet compleet: de map vendor/ ontbreekt.\n"
+        . "Daar zit de PDF-motor in, dus zonder die map werkt er niets.\n\n"
+        . "Dit gebeurt als je de broncode van GitHub hebt gedownload. In de\n"
+        . "broncode zit vendor/ met opzet niet; die hoort bij het uitrolpakket.\n\n"
+        . "Wat je nodig hebt:\n\n"
+        . "  https://github.com/janpaulb/printscript/releases/latest\n\n"
+        . "Download daar printscript-php.zip (niet \"Source code\"), pak hem uit,\n"
+        . "en zet de inhoud in deze map. Daar zit vendor/ al in.\n\n"
+        . "Heb je wel shell-toegang, dan kan het ook zo:  composer install --no-dev\n"
     );
 }
 require $autoload;
