@@ -2,9 +2,9 @@
 
 Plak een Google Docs-link, krijg een drukklare PDF terug.
 
-PrintScript is een webapp. Je geeft het een Google Docs-URL (of je sleept een
-`.docx` naar het venster) en het levert een PDF af die klaar is om te printen —
-met altijd dezelfde vier regels:
+PrintScript is een PHP-webapp die je op een gewone webserver zet. Je geeft het
+een Google Docs-URL (of je sleept een `.docx` naar het venster) en het levert
+een PDF af die klaar is om te printen — met altijd dezelfde vier regels:
 
 | | |
 |---|---|
@@ -18,78 +18,50 @@ tekst blijft, geschrapte tekst verdwijnt.
 
 ---
 
-## Snel starten
+## Installeren
 
-### Docker (aanbevolen — je hoeft niets te installeren)
+### Op een gewone webserver (geen shell nodig)
 
-Op macOS heb je hiervoor [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-nodig; `docker` zit niet standaard op je Mac.
+1. Download **printscript-php.zip** bij de [releases](../../releases/latest).
+2. Pak hem uit.
+3. Zet de inhoud in de webmap van je hosting (`public_html`, `www`, `httpdocs`).
+4. Ga naar het adres in je browser. Klaar.
 
-```bash
-docker run -p 5000:5000 ghcr.io/janpaulb/printscript:latest
-```
+Er is niets te configureren. Ontbreekt er iets op je server, dan zegt de pagina
+zelf welke PHP-uitbreiding je hostingpartij moet aanzetten.
 
-of vanuit de repository:
+### Met Composer
 
 ```bash
 git clone https://github.com/janpaulb/printscript.git
 cd printscript
-docker compose up
+composer install --no-dev
+php -S localhost:8000     # of zet de map in je webroot
 ```
 
-Open [http://localhost:5000](http://localhost:5000).
+### Wat je server nodig heeft
 
-### Zonder Docker
+| | |
+|---|---|
+| PHP | 8.1 of nieuwer |
+| Verplicht | `zip`, `dom`, `mbstring` |
+| Voor afbeeldingen | `gd` |
+| Voor Google Docs-links | `curl` |
 
-Nodig: Python 3.11+ en de Pango-bibliotheken die WeasyPrint gebruikt.
-
-```bash
-# macOS
-brew install python pango libffi
-
-# Debian / Ubuntu
-sudo apt-get install python3-venv libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b
-```
-
-Daarna:
-
-```bash
-./run.sh
-```
-
-Het script maakt een virtuele omgeving, installeert de packages, controleert of
-WeasyPrint echt een PDF kan maken en start de server op poort 5000.
-
-**Over poort 5000.** Op macOS luistert de AirPlay-ontvanger daar sinds Monterey.
-`run.sh` merkt dat, zegt wie de poort bezet houdt en neemt zelf de eerstvolgende
-vrije poort. Wil je er zelf een kiezen: `PORT=8080 ./run.sh` — dan wijkt het
-script níet uit, maar meldt het dat die poort bezet is.
-
-**Over macOS.** Homebrew zet Pango in `/opt/homebrew/lib` (Apple Silicon) of
-`/usr/local/lib` (Intel), maar Python kijkt daar uit zichzelf niet — vandaar de
-klassieke "Pango ontbreekt" terwijl `brew install pango` zegt dat alles er al
-staat. `run.sh` zet daarom `DYLD_FALLBACK_LIBRARY_PATH` goed. Eén ding kan het
-script niet omzeilen: de Python van Apple (`/usr/bin/python3`) negeert die
-instelling, want macOS wist hem bij het starten van systeemprogramma's. Merkt
-het script dat je omgeving daarop gebouwd is, dan bouwt het hem opnieuw op met
-de Python van Homebrew. Daarom staat `python` hierboven in het brew-commando.
-
-Lukt het dan nog niet, dan toont `run.sh` de échte foutmelding van WeasyPrint
-plus een controle of Pango en Python dezelfde architectuur hebben (arm64 tegen
-x86_64 is de andere gebruikelijke oorzaak).
+Dat is de standaarduitrusting van vrijwel elke hosting. Zonder `curl` werkt het
+uploaden van een `.docx` nog gewoon.
 
 ---
 
 ## Gebruik
 
 1. Zet je Google Doc op **Delen → Iedereen met de link → Kijker**.
-2. Plak de link in PrintScript en klik op **Maak drukklare PDF**.
+2. Plak de link en klik op **Maak drukklare PDF**.
 3. Klik op **🖨 Printen**. Het printvenster opent meteen vanuit het
-   voorbeeldvenster — je hoeft niets te downloaden of in een nieuw tabblad te
-   openen. Downloaden kan natuurlijk ook.
+   voorbeeldvenster — je hoeft niets te downloaden of in een tabblad te openen.
 
 Wil je helemaal niet klikken: zet onder **Opties** de schakelaar *Printvenster
-meteen openen* aan, dan verschijnt het printvenster zodra de PDF klaar is.
+meteen openen* aan.
 
 Ondersteunde linkvormen:
 
@@ -101,31 +73,33 @@ https://drive.google.com/open?id=<ID>
 <ID>
 ```
 
-Voor privédocumenten heb je een OAuth-token nodig; zet die in de omgeving als
-`GOOGLE_ACCESS_TOKEN` of stuur hem mee als `access_token` in de API-aanroep.
+Voor privédocumenten heb je een OAuth-token nodig: zet die in de omgeving als
+`GOOGLE_ACCESS_TOKEN`, of stuur hem mee als `access_token` in de API-aanroep.
 
 ### Opties
 
 | Optie | Standaard | Effect |
 |---|---|---|
-| Afbeeldingen alleen op pagina 1 | aan | zet uit om alle afbeeldingen te behouden |
-| Paginanummer toevoegen als het document er geen heeft | aan | zet uit om exact de voettekst van het document te volgen |
+| Afbeeldingen alleen op pagina 1 | aan | uit = alle afbeeldingen behouden |
+| Paginanummer toevoegen als het document er geen heeft | aan | uit = exact de voettekst van het document volgen |
 | Geen paginanummer op pagina 1 | uit | handig als pagina 1 een omslag is |
-| Printvenster meteen openen | uit | print zodra de PDF klaar is, zonder extra klik |
+| Printvenster meteen openen | uit | print zodra de PDF klaar is |
 
 ---
 
 ## API
 
+Dezelfde ingang doet het werk:
+
 ```bash
 # Google Docs-link
-curl -X POST http://localhost:5000/api/convert \
+curl -X POST https://jouwsite.nl/printscript/ \
      -H 'Content-Type: application/json' \
      -d '{"url": "https://docs.google.com/document/d/<ID>/edit"}' \
      -o script.pdf
 
 # Word-bestand
-curl -X POST http://localhost:5000/api/convert \
+curl -X POST https://jouwsite.nl/printscript/ \
      -F file=@script.docx \
      -F 'options={"page_numbers_on_first_page": false}' \
      -o script.pdf
@@ -137,73 +111,71 @@ waarschuwingen. Bij een fout komt er JSON terug (`{"error": "…"}`) met een
 passende statuscode: 400 voor een onbruikbare link of een kapot bestand, 403
 voor een document zonder leestoegang, 502 als Google zelf niet meewerkt.
 
-`GET /healthz` geeft `{"status": "ok"}` voor je loadbalancer.
-
 ---
 
 ## Hoe het werkt
 
 ```
 Google Docs-URL ──► export?format=docx ──┐
-                                         ├─► clean ─► render ─► layout ─► PDF
+                                         ├─► schoonmaken ─► lezen ─► opmaken ─► PDF
 Geüploade .docx ─────────────────────────┘
 ```
 
-| Module | Verantwoordelijkheid |
+| Bestand | Verantwoordelijkheid |
 |---|---|
-| `printscript/gdocs.py` | link → document-id → `.docx`-bytes (+ de titel uit de response-header) |
-| `printscript/package.py` | het `.docx`-zip als parts en relaties, volledig in het geheugen |
-| `printscript/clean.py` | opmerkingen en markeringen uit álle parts, ook uit `styles.xml` |
-| `printscript/styles.py` | `styles.xml` en `numbering.xml` platgeslagen tot bruikbare tabellen |
-| `printscript/docxhtml.py` | WordprocessingML → HTML + CSS |
-| `printscript/pdf.py` | opmaak naar PDF, plus de pagina-1-regel voor afbeeldingen |
-| `printscript/pipeline.py` | de vier stappen aan elkaar geknoopt |
-| `app.py` | Flask-routes en de webinterface |
+| `src/GoogleDocs.php` | link → document-id → `.docx` (+ de titel uit de response-header) |
+| `src/Package.php` | het `.docx`-zip als onderdelen en relaties, volledig in het geheugen |
+| `src/Clean.php` | opmerkingen en markeringen uit álle onderdelen, ook uit `styles.xml` |
+| `src/Styles.php`, `src/Numbering.php` | `styles.xml` en `numbering.xml` platgeslagen |
+| `src/HtmlRenderer.php` | WordprocessingML → HTML + CSS |
+| `src/Engine/MpdfEngine.php` | opmaak naar PDF, plus de pagina-1-regel voor afbeeldingen |
+| `src/Pipeline.php` | de vier stappen aan elkaar |
+| `index.php` | de webinterface en de API |
 
-### Waarom dit werkt waar de vorige versie faalde
+### De pagina-1-regel wordt op de échte opmaak toegepast
 
-**De pagina-1-regel wordt op de échte opmaak toegepast.** "Alle afbeeldingen na
-pagina 1" is een uitspraak over het *geprinte* document, niet over de opmaakcode.
-De oude versie zocht naar een expliciete pagina-einde-tag in het `.docx` en
-gokte de rest; stond er geen pagina-einde in — het normale geval — dan gebeurde
-er niets. PrintScript maakt de opmaak nu één keer, vraagt WeasyPrint op welke
-pagina elke afbeelding is beland, gooit alles vanaf pagina 2 weg en maakt de
-opmaak opnieuw. Die tweede ronde is veilig: weghalen kan tekst alleen naar
-vóren trekken, dus wat op pagina 1 stond blijft daar en er kan niets nieuws
-bijkomen.
+"Alle afbeeldingen na pagina 1" is een uitspraak over het *geprinte* document,
+niet over de opmaakcode. Zoeken naar een pagina-einde in het `.docx` werkt
+niet: in de meeste documenten staat er geen, en dan gebeurt er niets.
 
-**Paginanummers worden geteld, niet overgeschreven.** `PAGE`- en
-`NUMPAGES`-velden worden CSS-tellers (`counter(page)`), zodat er staat wat er
-werkelijk geprint wordt in plaats van het getal dat Word ooit had onthouden.
+PrintScript maakt het document daarom één keer op, met een bladwijzer bij elke
+afbeelding — mPDF onthoudt van bladwijzers op welke pagina ze staan. Alles
+vanaf pagina 2 gaat eruit, en dan volgt een tweede opmaakronde. Die is veilig:
+weghalen kan later materiaal alleen naar vóren trekken, dus wat op pagina 1
+stond blijft daar en er kan niets bijkomen. Logo's in kop- en voetteksten
+blijven buiten schot: alleen afbeeldingen in de lopende tekst tellen mee.
 
-**Kop- en voetteksten zijn echte kop- en voetteksten.** Ze worden CSS *running
-elements* in de marges van `@page`, met hun eigen opmaak, hun eigen logo's en
-een aparte variant voor de titelpagina wanneer het document die heeft.
+### Paginanummers worden geteld, niet overgeschreven
 
-**Geen extern conversieproces.** De vorige versies riepen LibreOffice aan — en
-verdronken in headless-modi, VCL-plug-ins, `DYLD_*`-variabelen en
-codesign-problemen op macOS. Er is nu geen los proces, geen office-suite en
-geen display: `lxml` leest het document, PrintScript rendert het zelf en
-WeasyPrint maakt er een PDF van.
+`PAGE`- en `NUMPAGES`-velden worden merktekens die de PDF-motor invult, zodat
+er staat wat er werkelijk geprint wordt in plaats van het getal dat Word ooit
+had onthouden.
 
-**Niets gaat het netwerk op.** De PDF-renderer krijgt een URL-fetcher die
-alleen `data:` toestaat, dus een document kan de server nooit een externe URL
-laten ophalen. Alle afbeeldingen zitten al als `data:`-URI in de HTML.
+### Kop- en voetteksten zijn echte kop- en voetteksten
+
+Ze worden per sectie apart opgemaakt, met hun eigen opmaak, hun eigen logo's en
+een aparte variant voor de titelpagina wanneer het document die heeft. Een
+voettekst met tabs wordt een nette links/midden/rechts-verdeling.
 
 ---
 
 ## Tests
 
 ```bash
-pip install -r requirements-dev.txt
-python -m pytest
+composer install
+composer test
 ```
 
-93 tests, ongeveer twee seconden. Ze bouwen `.docx`-pakketten met de hand
-(`tests/fixtures.py`) en controleren de **uitkomst in de PDF** — welke pagina's
-er zijn, welke afbeeldingen daadwerkelijk op welke pagina getekend worden, welke
-tekst er staat en welke er níet staat. De Docker-build draait dezelfde suite,
-dus een image die geen document kan omzetten wordt niet gepubliceerd.
+54 tests, ongeveer een halve seconde. Ze bouwen `.docx`-pakketten met de hand
+(`tests/DocxBuilder.php`) en controleren de **uitkomst in de PDF**
+(`tests/PdfInspector.php`): welke pagina's er zijn, welke afbeeldingen
+daadwerkelijk op welke pagina getekend worden, welke tekst er staat en welke er
+níet staat.
+
+Dat laatste vraagt om een PDF-lezer, want de tekst in een PDF bestaat uit
+glyph-nummers van een subset-lettertype. `PdfInspector` pakt de paginastromen
+uit en vertaalt ze terug via de ToUnicode-tabel die de PDF zelf meelevert. Zo
+bewijzen de tests wat er op papier komt, niet welke functie is aangeroepen.
 
 ---
 
@@ -211,15 +183,29 @@ dus een image die geen document kan omzetten wordt niet gepubliceerd.
 
 | | |
 |---|---|
-| Maximale bestandsgrootte | 50 MB |
+| Maximale bestandsgrootte | 50 MB (en wat je hosting toestaat) |
 | Invoer | `.docx` en Google Docs |
 | Uitvoer | PDF |
 | Zwevende afbeeldingen | worden in de tekstregel geplaatst, niet omlopend |
-| EMF-/WMF-afbeeldingen | worden overgeslagen (met een waarschuwing) — dat formaat kan niet in een PDF |
-| Tabstops | de standaardafstand; kop- en voetteksten met tabs worden wél als links/midden/rechts opgemaakt |
+| EMF-/WMF-afbeeldingen | worden overgeslagen (met een waarschuwing) |
+| Tabstops | de standaardafstand; kop- en voetteksten met tabs worden wél links/midden/rechts |
 | Titelpagina-instelling | wordt op de eerste sectie toegepast |
 | Grafieken en SmartArt | worden overgeslagen (met een waarschuwing) |
+| Lettertypen | de DejaVu-familie; ontbrekende lettertypen vallen daarop terug |
 
 Waarschuwingen komen in de webinterface onder het resultaat te staan en in de
 `X-PrintScript-Summary`-header, zodat je weet wat er is overgeslagen in plaats
 van dat het stilletjes verdwijnt.
+
+---
+
+## Uitrolpakket maken
+
+```bash
+./build-release.sh          # levert printscript-php.zip
+SLIM=0 ./build-release.sh   # met alle lettertypen van mPDF erbij
+```
+
+Standaard blijven alleen de DejaVu- en Free-lettertypen staan; dat scheelt
+ruim 60 MB en is voor Nederlandse scripts ruim voldoende. De testsuite draait
+ook tegen die uitgedunde set.

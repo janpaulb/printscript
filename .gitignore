@@ -1,9 +1,11 @@
-__pycache__/
-*.py[cod]
-.pytest_cache/
-.venv/
-venv/
-.env
+vendor/
+composer.phar
+.phpunit.result.cache
+.phpunit.cache/
+
+build/
+*.zip
 
 *.pdf
 *.docx
+.env

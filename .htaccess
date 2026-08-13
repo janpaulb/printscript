@@ -1,0 +1,25 @@
+# PrintScript — alles wat geen webpagina is, blijft buiten bereik.
+#
+# Op de meeste hosting werkt dit zonder meer. Draait je server op nginx of
+# Caddy, zorg dan zelf dat alleen index.php en assets/ bereikbaar zijn.
+
+<IfModule mod_rewrite.c>
+    RewriteEngine On
+    RewriteRule ^(src|tests|vendor|build)/ - [F,L]
+</IfModule>
+
+<FilesMatch "\.(json|lock|xml|md|sh|dist)$">
+    Require all denied
+</FilesMatch>
+
+<Files "index.php">
+    Require all granted
+</Files>
+
+# Een groot script mag ook geupload kunnen worden.
+<IfModule mod_php.c>
+    php_value upload_max_filesize 50M
+    php_value post_max_size 52M
+    php_value max_execution_time 180
+    php_value memory_limit 512M
+</IfModule>
