@@ -18,12 +18,17 @@ final class RenderedDocument
      * @param RenderedSection[] $sections
      * @param string[] $warnings
      * @param string[] $imageIds merktekens van afbeeldingen in de lopende tekst
+     * @param array<string, array{data: string, mime: string}> $images de
+     *        afbeeldingen zelf, gesleuteld op het merkteken dat in de src
+     *        staat. Ze staan met opzet niet in de HTML: als base64 zou één
+     *        foto de HTML al over de PCRE-limiet van mPDF duwen.
      */
     public function __construct(
         public readonly string $css,
         public readonly array $sections,
         public readonly array $warnings = [],
         public readonly array $imageIds = [],
+        public readonly array $images = [],
     ) {
     }
 }

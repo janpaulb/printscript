@@ -41,32 +41,76 @@ final class MpdfEngine implements EngineInterface
 
     public function render(RenderedDocument $document, Options $options): EngineResult
     {
-        $withBookmarks = $options->imagesFirstPageOnly && $document->imageIds !== [];
-        $html = $this->buildHtml($document, $options, $withBookmarks);
+        // De afbeeldingen reizen los van de HTML mee en worden hier pas op
+        // schijf gezet. Als base64 in de HTML zou één foto het document al
+        // over de PCRE-limiet van mPDF duwen.
+        $paths = $this->writeImages($document->images);
 
-        $first = $this->run($html, $document);
-        $imagesRemoved = 0;
+        try {
+            $withBookmarks = $options->imagesFirstPageOnly && $document->imageIds !== [];
+            $html = $this->buildHtml($document, $options, $withBookmarks, [], $paths);
 
-        if ($withBookmarks) {
-            $doomed = $this->imagesBeyondFirstPage($first['bookmarks'], $document->imageIds);
-            if ($doomed !== []) {
-                $html = $this->buildHtml($document, $options, false, $doomed);
+            $result = $this->run($html, $document);
+            $imagesRemoved = 0;
+
+            if ($withBookmarks) {
+                $doomed = $this->imagesBeyondFirstPage($result['bookmarks'], $document->imageIds);
                 $imagesRemoved = count($doomed);
-                $first = $this->run($html, $document);
-            } else {
-                // Niets te verwijderen, maar de bladwijzers moeten wel weg.
-                $html = $this->buildHtml($document, $options, false);
-                $first = $this->run($html, $document);
+                // Tweede ronde: zonder bladwijzers, en zonder wat weg moest.
+                $html = $this->buildHtml($document, $options, false, $doomed, $paths);
+                $result = $this->run($html, $document);
+            }
+
+            return new EngineResult(
+                pdf: $result['pdf'],
+                pageCount: $result['pages'],
+                imagesRemoved: $imagesRemoved,
+                warnings: $document->warnings,
+                engine: $this->name(),
+            );
+        } finally {
+            foreach ($paths as $path) {
+                @unlink($path);
             }
         }
+    }
 
-        return new EngineResult(
-            pdf: $first['pdf'],
-            pageCount: $first['pages'],
-            imagesRemoved: $imagesRemoved,
-            warnings: $document->warnings,
-            engine: $this->name(),
-        );
+    /**
+     * Zet de afbeeldingen als tijdelijke bestanden neer.
+     *
+     * @param array<string, array{data: string, mime: string}> $images
+     * @return array<string, string> merkteken => bestandspad
+     */
+    private function writeImages(array $images): array
+    {
+        $paths = [];
+        $directory = $this->temporaryDirectory ?? sys_get_temp_dir();
+
+        foreach ($images as $token => $image) {
+            $extension = match ($image['mime']) {
+                'image/png' => 'png',
+                'image/jpeg' => 'jpg',
+                'image/gif' => 'gif',
+                'image/bmp' => 'bmp',
+                'image/webp' => 'webp',
+                'image/svg+xml' => 'svg',
+                default => 'img',
+            };
+            $path = tempnam($directory, 'psimg');
+            if ($path === false) {
+                throw new \RuntimeException(
+                    'De server kan geen tijdelijke bestanden schrijven, dus '
+                    . 'afbeeldingen kunnen niet worden verwerkt.'
+                );
+            }
+            $named = $path . '.' . $extension;
+            if (@rename($path, $named)) {
+                $path = $named;
+            }
+            file_put_contents($path, $image['data']);
+            $paths[$token] = $path;
+        }
+        return $paths;
     }
 
     /** @return array{pdf: string, pages: int, bookmarks: array<string, int>} */
@@ -90,6 +134,8 @@ final class MpdfEngine implements EngineInterface
         if ($this->temporaryDirectory !== null) {
             $configuration['tempDir'] = $this->temporaryDirectory;
         }
+
+        $this->raiseBacktrackLimit($html);
 
         $mpdf = new Mpdf($configuration);
         $mpdf->useSubstitutions = true;
@@ -128,12 +174,16 @@ final class MpdfEngine implements EngineInterface
         return $doomed;
     }
 
-    /** @param string[] $withoutImages */
+    /**
+     * @param string[] $withoutImages
+     * @param array<string, string> $imagePaths merkteken => bestandspad
+     */
     private function buildHtml(
         RenderedDocument $document,
         Options $options,
         bool $withBookmarks,
-        array $withoutImages = []
+        array $withoutImages = [],
+        array $imagePaths = []
     ): string {
         $parts = ['<style>', $document->css, $this->pageRules($document, $options), '</style>'];
 
@@ -152,7 +202,13 @@ final class MpdfEngine implements EngineInterface
             $parts[] = $body;
         }
 
-        return implode("\n", $parts);
+        $html = implode("\n", $parts);
+
+        // De merktekens in de src worden nu pas echte paden.
+        if ($imagePaths !== []) {
+            $html = strtr($html, $imagePaths);
+        }
+        return $html;
     }
 
     /**
@@ -347,6 +403,30 @@ final class MpdfEngine implements EngineInterface
     {
         return str_contains($html, HtmlRenderer::PAGE_NUMBER_MARK)
             || str_contains($html, HtmlRenderer::PAGE_COUNT_MARK);
+    }
+
+    /**
+     * mPDF weigert HTML die groter is dan pcre.backtrack_limit — een grens die
+     * standaard op 1 MB staat. De afbeeldingen zitten er niet meer in, maar een
+     * lang script haalt die grens met tekst alleen ook.
+     */
+    private function raiseBacktrackLimit(string $html): void
+    {
+        $needed = strlen($html) + 1024 * 1024;
+        $current = (int) ini_get('pcre.backtrack_limit');
+        if ($current >= $needed) {
+            return;
+        }
+        if (@ini_set('pcre.backtrack_limit', (string) $needed) === false) {
+            throw new \RuntimeException(sprintf(
+                'Dit document levert %d MB aan opmaak op, meer dan de grens van '
+                . '%d MB die deze server toestaat (pcre.backtrack_limit), en die '
+                . 'grens mag hier niet verhoogd worden. Vraag je hostingpartij om '
+                . 'pcre.backtrack_limit te verhogen.',
+                intdiv(strlen($html), 1024 * 1024) + 1,
+                intdiv($current, 1024 * 1024)
+            ));
+        }
     }
 
     /** mPDF rekent in millimeters, Word in punten. */
