@@ -3,6 +3,9 @@ name: Tests
 on:
   push:
     branches: ['**']
+    # Zonder deze regel draait er bij een versietag niets, en verschijnt het
+    # uitrolpakket dus nooit bij de releases.
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 
