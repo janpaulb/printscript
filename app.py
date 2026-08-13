@@ -1,205 +1,170 @@
 """
-PrintScript – Word to print-ready PDF converter.
-Flask web application entry point.
+PrintScript — Flask web application.
+
+One endpoint does the work: POST /api/convert accepts either a Google Docs URL
+(JSON) or an uploaded .docx (multipart) and answers with the finished PDF.  The
+conversion summary rides along in a header so the page can show what was
+stripped without a second request.
 """
 
-import io
+from __future__ import annotations
+
+import base64
+import json
 import logging
 import os
-import queue
-import re
-import shutil
-import sys
-import tempfile
-import uuid
-from pathlib import Path
+from urllib.parse import quote
+
+from flask import Flask, Response, jsonify, render_template, request
+from werkzeug.exceptions import RequestEntityTooLarge
+
+from printscript import __version__
+from printscript.gdocs import DocumentAccessError, GoogleDocsError
+from printscript.package import InvalidDocxError
+from printscript.pipeline import (MAX_UPLOAD_BYTES, ConversionOptions,
+                                  ConversionResult, convert_docx,
+                                  convert_google_doc)
 
 log = logging.getLogger(__name__)
 
-from flask import Flask, jsonify, render_template, request, send_file
-from werkzeug.exceptions import RequestEntityTooLarge
-
-from processor import process
-from gdocs import download_as_docx, extract_doc_id
-
-# When running as a PyInstaller bundle, templates and static files are
-# extracted to sys._MEIPASS. main.py sets PRINTSCRIPT_BASE_DIR accordingly.
-# In development, __file__ resolves to the project directory.
-_base_dir = (
-    os.environ.get('PRINTSCRIPT_BASE_DIR')
-    or (sys._MEIPASS if getattr(sys, 'frozen', False) else None)  # type: ignore[attr-defined]
-    or os.path.dirname(os.path.abspath(__file__))
-)
-
-app = Flask(
-    __name__,
-    template_folder=os.path.join(_base_dir, 'templates'),
-    static_folder=os.path.join(_base_dir, 'static'),
-)
-app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50 MB upload limit
-
-ALLOWED_EXTENSIONS = {'.docx'}
+ALLOWED_EXTENSIONS = ('.docx',)
 
 
-@app.errorhandler(RequestEntityTooLarge)
-def handle_too_large(_e):
-    return jsonify(error='Bestand is te groot (maximaal 50 MB).'), 413
+def create_app() -> Flask:
+    app = Flask(__name__)
+    app.config['MAX_CONTENT_LENGTH'] = MAX_UPLOAD_BYTES
+    app.config['JSON_AS_ASCII'] = False
 
-# Only allow safe filename characters in the download name
-_SAFE_STEM_RE = re.compile(r'[^\w\- ]')
+    @app.get('/')
+    def index():
+        return render_template('index.html', version=__version__)
+
+    @app.get('/healthz')
+    def healthz():
+        return jsonify(status='ok', version=__version__)
+
+    @app.post('/api/convert')
+    def convert():
+        try:
+            options, source = _read_request()
+        except ValueError as exc:
+            return jsonify(error=str(exc)), 400
+
+        try:
+            if source['kind'] == 'url':
+                result = convert_google_doc(source['url'], options,
+                                            access_token=source.get('access_token'))
+            else:
+                result = convert_docx(source['data'], options,
+                                      title=source.get('filename'))
+        except DocumentAccessError as exc:
+            return jsonify(error=str(exc)), 403
+        except GoogleDocsError as exc:
+            return jsonify(error=str(exc)), 502
+        except InvalidDocxError as exc:
+            return jsonify(error=str(exc)), 400
+        except ValueError as exc:
+            # An unusable link or an unreadable package: the caller's problem.
+            return jsonify(error=str(exc)), 400
+        except Exception as exc:                      # noqa: BLE001 — last resort
+            log.exception('Conversie mislukt')
+            return jsonify(
+                error='Conversie mislukt: %s' % exc,
+                detail=type(exc).__name__,
+            ), 500
+
+        return _pdf_response(result)
+
+    @app.errorhandler(RequestEntityTooLarge)
+    def too_large(_error):
+        return jsonify(error='Het bestand is groter dan de limiet van %d MB.'
+                       % (MAX_UPLOAD_BYTES // (1024 * 1024))), 413
+
+    @app.errorhandler(404)
+    def not_found(_error):
+        return jsonify(error='Onbekend adres.'), 404
+
+    return app
 
 
-def _safe_stem(raw: str) -> str:
-    """Sanitize a filename stem to safe ASCII characters."""
-    stem = Path(raw).stem
-    stem = _SAFE_STEM_RE.sub('_', stem).strip('_ ')
-    return stem or 'document'
+# ── Request / response plumbing ──────────────────────────────────────────────
+
+def _read_request():
+    """Return (ConversionOptions, source) for either request shape."""
+    if request.files:
+        upload = request.files.get('file')
+        if upload is None or not upload.filename:
+            raise ValueError('Geen bestand ontvangen.')
+        if not upload.filename.lower().endswith(ALLOWED_EXTENSIONS):
+            raise ValueError('Alleen .docx-bestanden kunnen worden omgezet. '
+                             'Exporteer je document eerst naar .docx.')
+        raw_options = request.form.get('options') or '{}'
+        try:
+            payload = json.loads(raw_options)
+        except json.JSONDecodeError:
+            payload = {}
+        return _options_from(payload), {
+            'kind': 'file',
+            'data': upload.read(),
+            'filename': upload.filename,
+        }
+
+    payload = request.get_json(silent=True) or {}
+    url = (payload.get('url') or '').strip()
+    if not url:
+        raise ValueError('Geen Google Docs-link opgegeven.')
+    return _options_from(payload.get('options') or payload), {
+        'kind': 'url',
+        'url': url,
+        'access_token': (payload.get('access_token') or '').strip() or None,
+    }
 
 
-def _allowed(filename: str) -> bool:
-    return Path(filename).suffix.lower() in ALLOWED_EXTENSIONS
-
-
-def _pdf_response(pdf_path: str, download_name: str):
-    """
-    Read the PDF into memory and return it as a download response.
-
-    Reading into memory before returning ensures the temp directory can be
-    cleaned up immediately without a race condition against Flask's file
-    streaming.
-    """
-    with open(pdf_path, 'rb') as fh:
-        data = fh.read()
-    return send_file(
-        io.BytesIO(data),
-        mimetype='application/pdf',
-        as_attachment=True,
-        download_name=download_name,
+def _options_from(payload: dict) -> ConversionOptions:
+    defaults = ConversionOptions()
+    if not isinstance(payload, dict):
+        return defaults
+    return ConversionOptions(
+        images_first_page_only=_flag(payload, 'images_first_page_only',
+                                     defaults.images_first_page_only),
+        add_page_numbers=_flag(payload, 'add_page_numbers',
+                               defaults.add_page_numbers),
+        page_numbers_on_first_page=_flag(payload, 'page_numbers_on_first_page',
+                                         defaults.page_numbers_on_first_page),
     )
 
 
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
-
-@app.route('/')
-def index():
-    return render_template('index.html')
+def _flag(payload: dict, key: str, default: bool) -> bool:
+    value = payload.get(key, default)
+    if isinstance(value, str):
+        return value.lower() not in ('0', 'false', 'no', 'off', '')
+    return bool(value)
 
 
-@app.route('/convert', methods=['POST'])
-def convert():
-    """Convert an uploaded .docx file."""
-    if 'file' not in request.files:
-        return jsonify(error='Geen bestand ontvangen.'), 400
+def _pdf_response(result: ConversionResult) -> Response:
+    summary = base64.b64encode(
+        json.dumps(result.summary, ensure_ascii=False).encode('utf-8')
+    ).decode('ascii')
 
-    file = request.files['file']
-    if not file or not file.filename:
-        return jsonify(error='Geen bestand geselecteerd.'), 400
-
-    if not _allowed(file.filename):
-        return jsonify(error='Alleen .docx bestanden zijn toegestaan.'), 400
-
-    stem = _safe_stem(file.filename)
-    tmpdir = tempfile.mkdtemp()
-    try:
-        input_path = os.path.join(tmpdir, f'{uuid.uuid4().hex}.docx')
-        output_path = os.path.join(tmpdir, f'{stem}_printscript.pdf')
-
-        file.save(input_path)
-        process(input_path, output_path)
-
-        response = _pdf_response(output_path, f'{stem}_printscript.pdf')
-    except Exception as exc:
-        log.exception('Conversie mislukt: bestand=%s', file.filename)
-        return jsonify(error=f'Conversie mislukt: {exc}'), 500
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-
+    response = Response(result.pdf, mimetype='application/pdf')
+    response.headers['Content-Disposition'] = (
+        "inline; filename=\"%s\"; filename*=UTF-8''%s"
+        % (_ascii_filename(result.filename), quote(result.filename))
+    )
+    response.headers['Content-Length'] = str(len(result.pdf))
+    response.headers['X-PrintScript-Summary'] = summary
+    response.headers['Cache-Control'] = 'no-store'
     return response
 
 
-@app.route('/convert-url', methods=['POST'])
-def convert_url():
-    """Convert a Google Docs document referenced by URL."""
-    body = request.get_json(silent=True) or {}
-    url = (body.get('url') or '').strip()
-
-    if not url:
-        return jsonify(error='Geen URL opgegeven.'), 400
-
-    try:
-        doc_id = extract_doc_id(url)
-    except ValueError as exc:
-        return jsonify(error=str(exc)), 400
-
-    tmpdir = tempfile.mkdtemp()
-    try:
-        input_path = os.path.join(tmpdir, f'{doc_id}.docx')
-        output_path = os.path.join(tmpdir, f'{doc_id}_printscript.pdf')
-
-        token = body.get('access_token') or None
-        download_as_docx(url, input_path, access_token=token)
-        process(input_path, output_path)
-
-        response = _pdf_response(output_path, f'printscript_{doc_id[:8]}.pdf')
-    except PermissionError as exc:
-        return jsonify(error=str(exc)), 403
-    except (ValueError, RuntimeError) as exc:
-        return jsonify(error=str(exc)), 400
-    except Exception as exc:
-        log.exception('Conversie mislukt: url=%s', url)
-        return jsonify(error=f'Conversie mislukt: {exc}'), 500
-    finally:
-        shutil.rmtree(tmpdir, ignore_errors=True)
-
-    return response
+def _ascii_filename(name: str) -> str:
+    return name.encode('ascii', 'replace').decode('ascii').replace('"', '')
 
 
-@app.route('/update-status')
-def update_status():
-    """
-    Drain the update queue and return the latest status to the UI.
-    Called by the frontend every few seconds via polling.
-    Falls back to the persisted state file when the queue is empty.
-    """
-    q = app.config.get('UPDATE_QUEUE')
-    latest = None
-    if q:
-        while True:
-            try:
-                latest = q.get_nowait()
-            except queue.Empty:
-                break
-
-    if latest:
-        return jsonify(latest)
-
-    # No live update in queue — return persisted state
-    try:
-        from updater import _load_state, get_active_version
-        state = _load_state()
-        if state.get('update_ready'):
-            return jsonify({
-                'status':  'ready',
-                'version': state.get('staged_version', ''),
-            })
-        return jsonify({
-            'status':  'idle',
-            'version': get_active_version(),
-        })
-    except Exception:
-        return jsonify({'status': 'idle'})
+app = create_app()
 
 
 if __name__ == '__main__':
-    import logging
-    logging.basicConfig(level=logging.INFO, format='%(levelname)s %(message)s')
-
-    # Ensure LibreOffice can run headlessly before accepting requests.
-    # On Linux this auto-installs libreoffice-headless or xvfb if needed.
-    from processor import bootstrap_headless_libreoffice
-    bootstrap_headless_libreoffice()
-
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    logging.basicConfig(level=logging.INFO,
+                        format='%(asctime)s %(levelname)s %(name)s: %(message)s')
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)

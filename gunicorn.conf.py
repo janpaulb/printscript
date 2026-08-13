@@ -1,48 +1,29 @@
 """
-Gunicorn production configuration for PrintScript.
+Gunicorn configuration for PrintScript.
 
-Usage:
     gunicorn --config gunicorn.conf.py app:app
-
-Or via Docker (see Dockerfile CMD).
 """
 
 import multiprocessing
+import os
 
-# ── Binding ────────────────────────────────────────────────────────────────────
-bind    = "0.0.0.0:5000"
+bind = '0.0.0.0:%s' % os.environ.get('PORT', '5000')
 
-# ── Workers ────────────────────────────────────────────────────────────────────
-# LibreOffice conversions are CPU-bound and each worker uses a unique profile
-# dir, so multiple workers run safely in parallel.
-workers     = multiprocessing.cpu_count()
-worker_class = "sync"
+# Conversion is CPU-bound and completely self-contained — no shared profile
+# directories, no helper processes — so workers scale linearly and safely.
+workers = int(os.environ.get('WEB_CONCURRENCY', min(multiprocessing.cpu_count(), 4)))
+worker_class = 'sync'
+threads = 1
 
-# ── Timeouts ───────────────────────────────────────────────────────────────────
-# A 50 MB DOCX can take up to 2 minutes to convert on a slow server.
-timeout      = 180   # seconds — worker killed if it exceeds this
-keepalive    = 5
+# A 50 MB document with hundreds of images is the worst case we allow.
+timeout = 180
+graceful_timeout = 30
+keepalive = 5
 
-# ── Logging ────────────────────────────────────────────────────────────────────
-accesslog  = "-"   # stdout
-errorlog   = "-"   # stderr
-loglevel   = "info"
+accesslog = '-'
+errorlog = '-'
+loglevel = os.environ.get('LOG_LEVEL', 'info')
 
-# ── Recycling ──────────────────────────────────────────────────────────────────
-# Recycle workers after N requests to prevent memory accumulation from
-# very large LibreOffice profile dirs.
-max_requests      = 500
+# WeasyPrint caches font data per process; recycling keeps that bounded.
+max_requests = 300
 max_requests_jitter = 50
-
-
-def on_starting(server):
-    """
-    Called once in the master process before any workers are forked.
-    Installing libreoffice-headless here means workers inherit the result
-    immediately — no concurrent apt-get calls, no per-worker overhead.
-    """
-    try:
-        from processor import bootstrap_headless_libreoffice
-        bootstrap_headless_libreoffice()
-    except Exception:
-        pass

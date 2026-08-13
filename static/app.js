@@ -1,234 +1,252 @@
-/* PrintScript – frontend logic */
+/* PrintScript front-end: pick a source, post it, show the PDF. */
+(function () {
+  'use strict';
 
-// ── Element refs ───────────────────────────────────────────────────────────
-const uploadCard   = document.getElementById('upload-card');
-const progressCard = document.getElementById('progress-card');
-const errorCard    = document.getElementById('error-card');
-const statusText   = document.getElementById('status-text');
-const errorText    = document.getElementById('error-text');
-const convertBtn   = document.getElementById('convert-btn');
-const retryBtn     = document.getElementById('retry-btn');
+  var el = function (id) { return document.getElementById(id); };
 
-// File tab
-const dropZone    = document.getElementById('drop-zone');
-const fileInput   = document.getElementById('file-input');
-const fileDisplay = document.getElementById('file-name-display');
+  var panels = {
+    input: el('input-panel'),
+    busy: el('busy-panel'),
+    error: el('error-panel'),
+    result: el('result-panel')
+  };
 
-// URL tab
-const gdocsInput  = document.getElementById('gdocs-url');
+  var urlInput = el('doc-url');
+  var fileInput = el('file-input');
+  var dropzone = el('dropzone');
+  var convertButton = el('convert');
+  var preview = el('preview');
 
-// Tabs
-const tabs   = document.querySelectorAll('.tab');
-const panels = document.querySelectorAll('.tab-panel');
+  var mode = 'url';
+  var chosenFile = null;
+  var objectUrl = null;
+  var previewReady = false;
+  var printWhenReady = false;
 
-// ── State ──────────────────────────────────────────────────────────────────
-let activeTab    = 'file';  // 'file' | 'url'
-let selectedFile = null;
-
-// ── Tab switching ──────────────────────────────────────────────────────────
-tabs.forEach(tab => {
-  tab.addEventListener('click', () => {
-    const panelId = tab.dataset.panel;
-    activeTab = panelId === 'panel-file' ? 'file' : 'url';
-
-    tabs.forEach(t => {
-      t.classList.toggle('active', t === tab);
-      t.setAttribute('aria-selected', t === tab ? 'true' : 'false');
-    });
-    panels.forEach(p => p.classList.toggle('hidden', p.id !== panelId));
-
-    updateConvertBtn();
+  preview.addEventListener('load', function () {
+    if (!objectUrl) { return; }
+    previewReady = true;
+    if (printWhenReady) {
+      printWhenReady = false;
+      printNow();
+    }
   });
-});
 
-// ── Convert button enable/disable ──────────────────────────────────────────
-function updateConvertBtn() {
-  if (activeTab === 'file') {
-    convertBtn.disabled = !selectedFile;
-  } else {
-    convertBtn.disabled = gdocsInput.value.trim().length === 0;
-  }
-}
+  /* ── Panel switching ─────────────────────────────────────────────── */
 
-gdocsInput.addEventListener('input', updateConvertBtn);
-
-// ── File selection ─────────────────────────────────────────────────────────
-function selectFile(file) {
-  if (!file) return;
-  if (!file.name.toLowerCase().endsWith('.docx')) {
-    showError('Alleen .docx bestanden zijn toegestaan.');
-    return;
-  }
-  selectedFile = file;
-  fileDisplay.textContent = file.name;
-  updateConvertBtn();
-}
-
-fileInput.addEventListener('change', () => selectFile(fileInput.files[0]));
-
-dropZone.addEventListener('click', (e) => {
-  if (e.target.closest('label, button')) return;
-  fileInput.click();
-});
-
-dropZone.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
-});
-
-['dragenter', 'dragover'].forEach(evt =>
-  dropZone.addEventListener(evt, (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); })
-);
-['dragleave', 'drop'].forEach(evt =>
-  dropZone.addEventListener(evt, (e) => { e.preventDefault(); dropZone.classList.remove('drag-over'); })
-);
-dropZone.addEventListener('drop', (e) => selectFile(e.dataTransfer.files[0]));
-
-// ── Conversion ─────────────────────────────────────────────────────────────
-convertBtn.addEventListener('click', () => {
-  if (activeTab === 'file' && selectedFile) startFileConversion();
-  else if (activeTab === 'url') startUrlConversion();
-});
-
-function startFileConversion() {
-  showProgress('Document verwerken\u2026');
-  const formData = new FormData();
-  formData.append('file', selectedFile);
-
-  fetch('/convert', { method: 'POST', body: formData })
-    .then(handleConvertResponse)
-    .catch(err => showError(err.message || 'Onbekende fout.'));
-}
-
-function startUrlConversion() {
-  const docUrl = gdocsInput.value.trim();
-  if (!docUrl) return;
-  showProgress('Google Docs ophalen en verwerken\u2026');
-
-  fetch('/convert-url', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url: docUrl }),
-  })
-    .then(handleConvertResponse)
-    .catch(err => showError(err.message || 'Onbekende fout.'));
-}
-
-async function handleConvertResponse(response) {
-  if (!response.ok) {
-    const data = await response.json().catch(() => ({}));
-    throw new Error(data.error || `Server fout: ${response.status}`);
+  function show(name) {
+    Object.keys(panels).forEach(function (key) {
+      panels[key].classList.toggle('is-hidden', key !== name);
+    });
   }
 
-  const blob = await response.blob();
-  const cd = response.headers.get('Content-Disposition') || '';
-  const match = cd.match(/filename[^;=\n]*=["']?([^"';\n]+)/);
-  const filename = match ? match[1] : 'printscript.pdf';
+  Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (tab) {
+    tab.addEventListener('click', function () {
+      Array.prototype.forEach.call(document.querySelectorAll('.tab'), function (other) {
+        var active = other === tab;
+        other.classList.toggle('is-active', active);
+        other.setAttribute('aria-selected', String(active));
+      });
+      mode = tab.dataset.target === 'pane-file' ? 'file' : 'url';
+      el('pane-url').classList.toggle('is-hidden', mode !== 'url');
+      el('pane-file').classList.toggle('is-hidden', mode !== 'file');
+      refresh();
+    });
+  });
 
-  // Use a distinct name to avoid shadowing outer variables
-  const blobUrl = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = blobUrl;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(blobUrl);
+  /* ── Enabling the button ─────────────────────────────────────────── */
 
-  setTimeout(resetToUpload, 800);
-}
+  function refresh() {
+    convertButton.disabled = mode === 'url'
+      ? urlInput.value.trim().length === 0
+      : chosenFile === null;
+  }
 
-// ── State helpers ──────────────────────────────────────────────────────────
-function showProgress(msg) {
-  uploadCard.classList.add('hidden');
-  errorCard.classList.add('hidden');
-  progressCard.classList.remove('hidden');
-  statusText.textContent = msg;
-}
+  urlInput.addEventListener('input', refresh);
+  urlInput.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter' && !convertButton.disabled) { convert(); }
+  });
 
-function showError(msg) {
-  uploadCard.classList.add('hidden');
-  progressCard.classList.add('hidden');
-  errorCard.classList.remove('hidden');
-  errorText.textContent = msg;
-}
+  /* ── File picking ────────────────────────────────────────────────── */
 
-function resetToUpload() {
-  progressCard.classList.add('hidden');
-  errorCard.classList.add('hidden');
-  uploadCard.classList.remove('hidden');
-  selectedFile = null;
-  fileInput.value = '';
-  fileDisplay.textContent = 'Geen bestand geselecteerd';
-  updateConvertBtn();
-}
+  function pick(file) {
+    if (!file) { return; }
+    if (!/\.docx$/i.test(file.name)) {
+      fail('Alleen .docx-bestanden kunnen worden omgezet.');
+      return;
+    }
+    chosenFile = file;
+    el('file-name').textContent = file.name;
+    refresh();
+  }
 
-retryBtn.addEventListener('click', resetToUpload);
+  dropzone.addEventListener('click', function () { fileInput.click(); });
+  dropzone.addEventListener('keydown', function (event) {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      fileInput.click();
+    }
+  });
+  fileInput.addEventListener('change', function () { pick(fileInput.files[0]); });
 
-// ── LibreOffice update notifications ───────────────────────────────────────
-const updateBanner = document.getElementById('update-banner');
-const updateIcon   = document.getElementById('update-icon');
-const updateMsg    = document.getElementById('update-msg');
+  ['dragenter', 'dragover'].forEach(function (name) {
+    dropzone.addEventListener(name, function (event) {
+      event.preventDefault();
+      dropzone.classList.add('is-over');
+    });
+  });
+  ['dragleave', 'drop'].forEach(function (name) {
+    dropzone.addEventListener(name, function (event) {
+      event.preventDefault();
+      dropzone.classList.remove('is-over');
+    });
+  });
+  dropzone.addEventListener('drop', function (event) {
+    pick(event.dataTransfer.files[0]);
+  });
 
-let updatePoller = null;
+  /* ── Conversion ──────────────────────────────────────────────────── */
 
-function pollUpdateStatus() {
-  fetch('/update-status')
-    .then(r => r.json())
-    .then(data => {
-      switch (data.status) {
-        case 'downloading': {
-          const pct = data.percent != null ? ` (${data.percent}%)` : '';
-          showUpdateBanner('downloading', '↻', `LibreOffice ${data.version} downloaden${pct}`);
-          break;
-        }
-        case 'extracting': {
-          showUpdateBanner('downloading', '↻', `LibreOffice ${data.version} installeren\u2026`);
-          break;
-        }
-        case 'signing': {
-          showUpdateBanner('downloading', '↻', `LibreOffice ${data.version} ondertekenen\u2026`);
-          break;
-        }
-        case 'ready': {
-          showUpdateBanner('ready', '✓',
-            `LibreOffice ${data.version} klaar \u2014 herstart om bij te werken`);
-          // Stop polling — status won't change until a restart
-          stopUpdatePoller();
-          break;
-        }
-        case 'up_to_date': {
-          // Nothing to show; stop polling until next launch
-          hideUpdateBanner();
-          stopUpdatePoller();
-          break;
-        }
-        default:
-          // 'idle', 'checking', unknown — keep banner hidden, keep polling
-          hideUpdateBanner();
+  function options() {
+    return {
+      images_first_page_only: el('opt-images').checked,
+      add_page_numbers: el('opt-numbers').checked,
+      page_numbers_on_first_page: !el('opt-first').checked
+    };
+  }
+
+  /* Print straight from the preview frame: the PDF is already loaded there,
+     so the print dialog opens without downloading or opening a tab first. */
+  function printNow() {
+    if (!objectUrl) { return; }
+    if (!previewReady) {
+      printWhenReady = true;
+      return;
+    }
+    try {
+      preview.contentWindow.focus();
+      preview.contentWindow.print();
+    } catch (error) {
+      // A browser that refuses to script its built-in PDF viewer still gets
+      // there via a normal tab.
+      window.open(objectUrl, '_blank', 'noopener');
+    }
+  }
+
+  function fail(message) {
+    el('error-text').textContent = message;
+    show('error');
+  }
+
+  function decodeSummary(response) {
+    var raw = response.headers.get('X-PrintScript-Summary');
+    if (!raw) { return null; }
+    try {
+      var json = decodeURIComponent(escape(window.atob(raw)));
+      return JSON.parse(json);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function filenameOf(response, summary) {
+    if (summary && summary.filename) { return summary.filename; }
+    var disposition = response.headers.get('Content-Disposition') || '';
+    var match = /filename\*=UTF-8''([^;]+)/.exec(disposition);
+    if (match) { return decodeURIComponent(match[1]); }
+    return 'printscript.pdf';
+  }
+
+  function convert() {
+    show('busy');
+    el('busy-text').textContent = mode === 'url'
+      ? 'Document ophalen bij Google…'
+      : 'Document inlezen…';
+
+    var request;
+    if (mode === 'url') {
+      request = fetch('/api/convert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: urlInput.value.trim(), options: options() })
+      });
+    } else {
+      var form = new FormData();
+      form.append('file', chosenFile);
+      form.append('options', JSON.stringify(options()));
+      request = fetch('/api/convert', { method: 'POST', body: form });
+    }
+
+    window.setTimeout(function () {
+      if (!panels.busy.classList.contains('is-hidden')) {
+        el('busy-text').textContent = 'Opmaken en pagina’s tellen…';
       }
-    })
-    .catch(() => hideUpdateBanner());
-}
+    }, 1200);
 
-function showUpdateBanner(cls, icon, msg) {
-  updateBanner.className = `update-banner ${cls} visible`;
-  updateIcon.textContent = icon;
-  updateMsg.textContent  = msg;
-}
-
-function hideUpdateBanner() {
-  updateBanner.classList.remove('visible');
-}
-
-function stopUpdatePoller() {
-  if (updatePoller) {
-    clearInterval(updatePoller);
-    updatePoller = null;
+    request.then(function (response) {
+      var type = response.headers.get('Content-Type') || '';
+      if (!response.ok || type.indexOf('application/pdf') === -1) {
+        return response.json()
+          .catch(function () { return { error: 'Onverwachte fout (HTTP ' + response.status + ').' }; })
+          .then(function (payload) { throw new Error(payload.error || 'Conversie mislukt.'); });
+      }
+      var summary = decodeSummary(response);
+      return response.blob().then(function (blob) {
+        succeed(blob, filenameOf(response, summary), summary);
+      });
+    }).catch(function (error) {
+      fail(error.message || 'De server is niet bereikbaar.');
+    });
   }
-}
 
-// Start polling — first call after 3 s to let the server settle, then every 5 s
-setTimeout(() => {
-  pollUpdateStatus();
-  updatePoller = setInterval(pollUpdateStatus, 5000);
-}, 3000);
+  function succeed(blob, filename, summary) {
+    if (objectUrl) { URL.revokeObjectURL(objectUrl); }
+    objectUrl = URL.createObjectURL(blob);
+    previewReady = false;
+    printWhenReady = el('opt-autoprint').checked;
+
+    el('result-name').textContent = filename;
+    el('download').href = objectUrl;
+    el('download').setAttribute('download', filename);
+    preview.src = objectUrl;
+
+    var parts = [];
+    if (summary) {
+      parts.push(summary.pages + (summary.pages === 1 ? ' pagina' : ' pagina’s'));
+      if (summary.images_removed) {
+        parts.push(summary.images_removed + ' afbeelding' +
+                   (summary.images_removed === 1 ? '' : 'en') + ' na pagina 1 verwijderd');
+      }
+      if (summary.comment_markers_removed) {
+        parts.push('opmerkingen verwijderd');
+      }
+      if (summary.highlighting_removed) {
+        parts.push('markeringen verwijderd');
+      }
+    }
+    parts.push(Math.max(1, Math.round(blob.size / 1024)) + ' kB');
+    el('result-meta').textContent = parts.join(' · ');
+
+    var warnings = el('warnings');
+    warnings.innerHTML = '';
+    if (summary && summary.warnings && summary.warnings.length) {
+      summary.warnings.forEach(function (text) {
+        var item = document.createElement('li');
+        item.textContent = text;
+        warnings.appendChild(item);
+      });
+      warnings.classList.remove('is-hidden');
+    } else {
+      warnings.classList.add('is-hidden');
+    }
+
+    show('result');
+  }
+
+  convertButton.addEventListener('click', convert);
+  el('retry').addEventListener('click', function () { show('input'); });
+  el('again').addEventListener('click', function () { show('input'); });
+  el('print').addEventListener('click', printNow);
+
+  refresh();
+}());

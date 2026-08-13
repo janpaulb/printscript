@@ -1,26 +1,18 @@
-# Git
 .git
 .gitignore
+.github/
 
-# Python cache
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+.venv/
+venv/
 
-# Build artifacts
-build/
-dist/
-bundled_libreoffice/
-*.spec
-
-# Test files
-test_processor.py
-
-# macOS build tools
-build_mac.sh
-.github/
-
-# Environment
-.env
 *.pdf
 *.docx
+.env
+
+README.md
+docker-compose.yml
+run.sh
