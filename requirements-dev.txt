@@ -1,4 +1,0 @@
--r requirements.txt
-
-pytest>=8.0
-pypdf>=4.0          # the tests assert against the produced PDF, not the HTML
