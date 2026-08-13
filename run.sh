@@ -49,14 +49,17 @@ choose_python() {
 # ── Omgeving opbouwen ────────────────────────────────────────────────────────
 
 create_venv() {
-  local interpreter="$1"
-  echo "Virtuele omgeving aanmaken met $interpreter…"
+  # Let op: geen leestekens buiten ASCII direct achter ${...} in dit script.
+  # De bash 3.2 van macOS rekent zulke bytes tot de variabelenaam, waardoor
+  # `set -u` afbreekt op een naam die niet bestaat.
+  local interpreter="${1:-python3}"
+  echo "Virtuele omgeving aanmaken met ${interpreter}..."
   rm -rf "$VENV"
   "$interpreter" -m venv "$VENV"
 }
 
 install_packages() {
-  echo "Packages installeren…"
+  echo "Packages installeren..."
   "$VENV/bin/pip" install --quiet --upgrade pip
   "$VENV/bin/pip" install --quiet -r requirements.txt
 }
@@ -73,13 +76,13 @@ PY
 explain_failure() {
   echo
   echo "WeasyPrint kan geen PDF maken. De echte foutmelding:"
-  echo "────────────────────────────────────────────────────"
+  echo "----------------------------------------------------"
   { "$VENV/bin/python" - <<'PY'
 import weasyprint
 weasyprint.HTML(string='<p>x</p>').write_pdf()
 PY
   } 2>&1 | tail -n 12 | sed 's/^/  /' || true
-  echo "────────────────────────────────────────────────────"
+  echo "----------------------------------------------------"
   echo
 
   if ! on_macos; then
