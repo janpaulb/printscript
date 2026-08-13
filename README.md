@@ -22,6 +22,9 @@ tekst blijft, geschrapte tekst verdwijnt.
 
 ### Docker (aanbevolen — je hoeft niets te installeren)
 
+Op macOS heb je hiervoor [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+nodig; `docker` zit niet standaard op je Mac.
+
 ```bash
 docker run -p 5000:5000 ghcr.io/janpaulb/printscript:latest
 ```
@@ -38,16 +41,37 @@ Open [http://localhost:5000](http://localhost:5000).
 
 ### Zonder Docker
 
-Nodig: Python 3.11+ en de Pango-bibliotheken die WeasyPrint gebruikt
-(`brew install pango libffi` op macOS, `apt-get install libpango-1.0-0
-libpangoft2-1.0-0` op Debian/Ubuntu).
+Nodig: Python 3.11+ en de Pango-bibliotheken die WeasyPrint gebruikt.
+
+```bash
+# macOS
+brew install python pango libffi
+
+# Debian / Ubuntu
+sudo apt-get install python3-venv libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b
+```
+
+Daarna:
 
 ```bash
 ./run.sh
 ```
 
 Het script maakt een virtuele omgeving, installeert de packages, controleert of
-WeasyPrint werkt en start de server op poort 5000.
+WeasyPrint echt een PDF kan maken en start de server op poort 5000.
+
+**Over macOS.** Homebrew zet Pango in `/opt/homebrew/lib` (Apple Silicon) of
+`/usr/local/lib` (Intel), maar Python kijkt daar uit zichzelf niet — vandaar de
+klassieke "Pango ontbreekt" terwijl `brew install pango` zegt dat alles er al
+staat. `run.sh` zet daarom `DYLD_FALLBACK_LIBRARY_PATH` goed. Eén ding kan het
+script niet omzeilen: de Python van Apple (`/usr/bin/python3`) negeert die
+instelling, want macOS wist hem bij het starten van systeemprogramma's. Merkt
+het script dat je omgeving daarop gebouwd is, dan bouwt het hem opnieuw op met
+de Python van Homebrew. Daarom staat `python` hierboven in het brew-commando.
+
+Lukt het dan nog niet, dan toont `run.sh` de échte foutmelding van WeasyPrint
+plus een controle of Pango en Python dezelfde architectuur hebben (arm64 tegen
+x86_64 is de andere gebruikelijke oorzaak).
 
 ---
 
