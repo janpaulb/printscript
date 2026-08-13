@@ -22,21 +22,23 @@ tekst blijft, geschrapte tekst verdwijnt.
 
 ### Op een gewone webserver (geen shell nodig)
 
-1. Download **printscript-php.zip** bij de [releases](../../releases/latest).
-2. Pak hem uit.
+1. Klik op **Code → Download ZIP** hierboven, of pak
+   **printscript-php.zip** bij de [releases](../../releases/latest).
+2. Pak het bestand uit.
 3. Zet de inhoud in de webmap van je hosting (`public_html`, `www`, `httpdocs`).
 4. Ga naar het adres in je browser. Klaar.
 
-Er is niets te configureren. Ontbreekt er iets op je server, dan zegt de pagina
-zelf welke PHP-uitbreiding je hostingpartij moet aanzetten.
+`vendor/` — de PDF-motor — staat in de repo, dus allebei de downloads zijn
+compleet. Je hebt geen Composer, shell-toegang of Python nodig. Er is ook
+niets te configureren: ontbreekt er iets op je server, dan zegt de pagina zelf
+welke PHP-uitbreiding je hostingpartij moet aanzetten.
 
-### Met Composer
+### Zelf aan de slag
 
 ```bash
 git clone https://github.com/janpaulb/printscript.git
 cd printscript
-composer install --no-dev
-php -S localhost:8000     # of zet de map in je webroot
+php -S localhost:8000     # draait meteen; vendor/ zit er al in
 ```
 
 ### Wat je server nodig heeft
@@ -162,9 +164,13 @@ voettekst met tabs wordt een nette links/midden/rechts-verdeling.
 ## Tests
 
 ```bash
-composer install
+COMPOSER=composer-dev.json composer install   # eenmalig
 composer test
 ```
+
+Het testgereedschap staat bewust in een eigen map (`vendor-dev/`), los van de
+`vendor/` die mee de server op gaat. Zo bevat die laatste precies wat er hoort
+en niets meer — 29 MB in plaats van ruim 2 GB.
 
 54 tests, ongeveer een halve seconde. Ze bouwen `.docx`-pakketten met de hand
 (`tests/DocxBuilder.php`) en controleren de **uitkomst in de PDF**
@@ -202,10 +208,10 @@ van dat het stilletjes verdwijnt.
 ## Uitrolpakket maken
 
 ```bash
-./build-release.sh          # levert printscript-php.zip
-SLIM=0 ./build-release.sh   # met alle lettertypen van mPDF erbij
+./build-release.sh    # levert printscript-php.zip (13 MB)
 ```
 
-Standaard blijven alleen de DejaVu- en Free-lettertypen staan; dat scheelt
-ruim 60 MB en is voor Nederlandse scripts ruim voldoende. De testsuite draait
-ook tegen die uitgedunde set.
+Het script pakt gewoon in wat er in de repo staat; Composer komt er niet aan
+te pas. In `vendor/` zitten alleen de DejaVu- en Free-lettertypen van mPDF en
+geen testbestanden van de pakketten — dat scheelt ruim 200 MB, en de testsuite
+draait tegen precies die uitgedunde set.

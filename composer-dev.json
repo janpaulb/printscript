@@ -1,0 +1,9 @@
+{
+    "description": "Alleen het testgereedschap. Staat los van composer.json, zodat vendor/ precies bevat wat er op de server hoort en niets meer.",
+    "require": {
+        "phpunit/phpunit": "^10.5"
+    },
+    "config": {
+        "vendor-dir": "vendor-dev"
+    }
+}
