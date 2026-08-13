@@ -166,3 +166,38 @@ def test_an_unknown_route_answers_json(client):
     response = client.get('/nergens')
     assert response.status_code == 404
     assert response.mimetype == 'application/json'
+
+
+# ── Starting up ──────────────────────────────────────────────────────────────
+
+def test_a_busy_port_is_detected_before_the_server_starts():
+    """
+    Werkzeug prints its own terse message and exits, so the check has to run
+    first — otherwise nobody learns that on macOS it is AirPlay holding
+    port 5000.
+    """
+    import socket
+
+    holder = socket.socket()
+    holder.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    holder.bind(('127.0.0.1', 0))
+    holder.listen(1)
+    busy_port = holder.getsockname()[1]
+    try:
+        assert app_module._port_in_use(busy_port) is True
+    finally:
+        holder.close()
+
+    free = socket.socket()
+    free.bind(('127.0.0.1', 0))
+    free_port = free.getsockname()[1]
+    free.close()
+    assert app_module._port_in_use(free_port) is False
+
+
+def test_the_busy_port_message_names_a_way_out(capsys):
+    app_module._explain_busy_port(5000)
+
+    printed = capsys.readouterr().err
+    assert 'PORT=5001' in printed
+    assert 'run.sh' in printed

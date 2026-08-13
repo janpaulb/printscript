@@ -9,6 +9,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
+PORT_WAS_CHOSEN=0
+[[ -n "${PORT:-}" ]] && PORT_WAS_CHOSEN=1
 PORT="${PORT:-5000}"
 VENV=".venv"
 BREW_PREFIX=""
@@ -69,6 +71,62 @@ weasyprint_works() {
 import weasyprint
 weasyprint.HTML(string='<p>PrintScript</p>').write_pdf()
 PY
+}
+
+# ── Poort kiezen ─────────────────────────────────────────────────────────────
+#
+# Op macOS luistert AirPlay-ontvanger sinds Monterey op poort 5000.  Wie dat
+# niet weet, ziet alleen "Address already in use" en is verder nergens.
+
+port_is_free() {
+  "$VENV/bin/python" - "$1" <<'PY' >/dev/null 2>&1
+import socket, sys
+probe = socket.socket()
+probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+try:
+    probe.bind(('0.0.0.0', int(sys.argv[1])))
+except OSError:
+    sys.exit(1)
+finally:
+    probe.close()
+PY
+}
+
+port_holder() {
+  command -v lsof >/dev/null 2>&1 || return 0
+  lsof -nP -iTCP:"$1" -sTCP:LISTEN 2>/dev/null | awk 'NR == 2 { print $1 }'
+}
+
+resolve_port() {
+  port_is_free "$PORT" && return 0
+
+  local holder candidate
+  holder="$(port_holder "$PORT")"
+
+  # Zelf een poort gekozen? Dan niet stiekem een andere pakken.
+  if [[ "$PORT_WAS_CHOSEN" == 1 ]]; then
+    echo "Poort ${PORT} is bezet${holder:+ door ${holder}}."
+    echo "Kies een andere:  PORT=5001 ./run.sh"
+    exit 1
+  fi
+
+  for candidate in 5001 5002 5050 8000 8080 8081; do
+    if port_is_free "$candidate"; then
+      echo "Poort ${PORT} is bezet${holder:+ door ${holder}}; PrintScript neemt poort ${candidate}."
+      case "$holder" in
+        ControlCe*|AirPlay*|rapportd)
+          echo "  Dat is de AirPlay-ontvanger van macOS. Uitzetten kan via"
+          echo "  Systeeminstellingen > Algemeen > AirDrop en Handoff."
+          ;;
+      esac
+      PORT="$candidate"
+      return 0
+    fi
+  done
+
+  echo "Poort ${PORT} is bezet en de alternatieven ook. Kies er zelf een:"
+  echo "  PORT=1234 ./run.sh"
+  exit 1
 }
 
 # ── Diagnose als het toch misgaat ────────────────────────────────────────────
@@ -165,5 +223,7 @@ if ! weasyprint_works; then
   exit 1
 fi
 
-echo "PrintScript draait op http://localhost:$PORT  (stoppen met Ctrl+C)"
+resolve_port
+
+echo "PrintScript draait op http://localhost:${PORT}  (stoppen met Ctrl+C)"
 PORT="$PORT" exec "$VENV/bin/python" app.py
