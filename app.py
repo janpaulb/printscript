@@ -10,9 +10,12 @@ stripped without a second request.
 from __future__ import annotations
 
 import base64
+import errno
 import json
 import logging
 import os
+import socket
+import sys
 from urllib.parse import quote
 
 from flask import Flask, Response, jsonify, render_template, request
@@ -164,7 +167,39 @@ def _ascii_filename(name: str) -> str:
 app = create_app()
 
 
+def _port_in_use(port: int) -> bool:
+    """
+    Werkzeug prints its own terse "Address already in use" and exits before we
+    could catch anything, so the check has to happen first.
+    """
+    probe = socket.socket()
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        probe.bind(('0.0.0.0', port))
+        return False
+    except OSError as exc:
+        return exc.errno in (errno.EADDRINUSE, errno.EACCES)
+    finally:
+        probe.close()
+
+
+def _explain_busy_port(port: int) -> None:
+    print('\nPoort %d is al in gebruik. Start op een andere poort:\n'
+          '    PORT=%d python app.py\n' % (port, port + 1), file=sys.stderr)
+    if port == 5000 and sys.platform == 'darwin':
+        # De klassieke macOS-valkuil: AirPlay luistert hier sinds Monterey.
+        print('Op macOS is poort 5000 meestal bezet door de AirPlay-ontvanger.\n'
+              'Uitzetten kan via Systeeminstellingen > Algemeen > '
+              'AirDrop en Handoff.\n', file=sys.stderr)
+    print('Of gebruik ./run.sh — dat zoekt zelf een vrije poort.\n',
+          file=sys.stderr)
+
+
 if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO,
                         format='%(asctime)s %(levelname)s %(name)s: %(message)s')
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False)
+    port = int(os.environ.get('PORT', 5000))
+    if _port_in_use(port):
+        _explain_busy_port(port)
+        raise SystemExit(1)
+    app.run(host='0.0.0.0', port=port, debug=False)

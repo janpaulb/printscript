@@ -60,6 +60,11 @@ Daarna:
 Het script maakt een virtuele omgeving, installeert de packages, controleert of
 WeasyPrint echt een PDF kan maken en start de server op poort 5000.
 
+**Over poort 5000.** Op macOS luistert de AirPlay-ontvanger daar sinds Monterey.
+`run.sh` merkt dat, zegt wie de poort bezet houdt en neemt zelf de eerstvolgende
+vrije poort. Wil je er zelf een kiezen: `PORT=8080 ./run.sh` — dan wijkt het
+script níet uit, maar meldt het dat die poort bezet is.
+
 **Over macOS.** Homebrew zet Pango in `/opt/homebrew/lib` (Apple Silicon) of
 `/usr/local/lib` (Intel), maar Python kijkt daar uit zichzelf niet — vandaar de
 klassieke "Pango ontbreekt" terwijl `brew install pango` zegt dat alles er al
