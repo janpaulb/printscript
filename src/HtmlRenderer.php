@@ -84,6 +84,8 @@ final class HtmlRenderer
     private array $warned = [];
     private array $imageIds = [];
     private int $imageSequence = 0;
+    private array $images = [];
+    private int $imageSourceSequence = 0;
     private array $listCounters = [];
     private float $defaultTab = self::DEFAULT_TAB;
     private float $contentWidth = self::DEFAULT_PAGE_WIDTH - 2 * self::DEFAULT_MARGIN;
@@ -136,7 +138,8 @@ final class HtmlRenderer
             implode("\n", $this->rules),
             $sections,
             $this->warnings,
-            $this->imageIds
+            $this->imageIds,
+            $this->images
         );
     }
 
@@ -1050,7 +1053,15 @@ final class HtmlRenderer
             $style[] = 'height: ' . Ns::pt($height);
         }
 
-        $tag = '<img src="data:' . $mime . ';base64,' . base64_encode($blob) . '"'
+        // Niet als data:-URI in de HTML. Eén foto van een telefoon is als
+        // base64 al gauw enkele megabytes, en mPDF weigert HTML die groter is
+        // dan pcre.backtrack_limit (standaard 1 MB). De motor zet er straks
+        // een bestandspad voor in de plaats.
+        $this->imageSourceSequence++;
+        $token = 'ps-image-' . $this->imageSourceSequence;
+        $this->images[$token] = ['data' => $blob, 'mime' => $mime];
+
+        $tag = '<img src="' . $token . '"'
             . ($style === [] ? '' : ' style="' . implode('; ', $style) . '"') . '>';
 
         if (!$context->tagImages) {

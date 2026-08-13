@@ -256,6 +256,81 @@ final class SpecsTest extends TestCase
         $this->assertStringContainsString('2', $pages[1]);
     }
 
+    // ── Grote documenten ─────────────────────────────────────────────────────
+
+    /**
+     * Een document met foto's moet gewoon door de molen komen.
+     *
+     * mPDF weigert HTML die groter is dan pcre.backtrack_limit, standaard 1 MB.
+     * Twee dingen houden dat tegen: de afbeeldingen zitten niet in de HTML (zie
+     * de test hieronder), en de motor verhoogt die grens als het toch nodig is.
+     * Deze test bewaakt de uitkomst; die hieronder bewaakt de aanpak, want het
+     * verhogen van de grens mag niet op elke server.
+     */
+    public function testADocumentWithLargePhotosStillConverts(): void
+    {
+        $builder = new DocxBuilder();
+        $body = DocxBuilder::paragraph('Omslag met fotos');
+        $base64Size = 0;
+
+        for ($index = 0; $index < 4; $index++) {
+            $photo = self::photoLikePng(500, 500, $index * 37);
+            $base64Size += strlen(base64_encode($photo));
+            $body .= '<w:p>' . DocxBuilder::imageRun($builder->addImage($photo)) . '</w:p>';
+        }
+        $body .= DocxBuilder::pageBreak() . DocxBuilder::paragraph('Twee') . DocxBuilder::SECTION;
+
+        // De opzet deugt alleen als dit werkelijk over de grens gaat.
+        $this->assertGreaterThan(
+            (int) ini_get('pcre.backtrack_limit'),
+            $base64Size,
+            'de proef moet groter zijn dan de PCRE-grens, anders bewijst hij niets'
+        );
+
+        $result = (new Pipeline())->convertDocx($builder->build($body));
+
+        $this->assertSame(2, $result->pageCount);
+        $this->assertStringStartsWith('%PDF', $result->pdf);
+    }
+
+    public function testImagesAreNotInlinedIntoTheHtml(): void
+    {
+        $builder = new DocxBuilder();
+        $image = $builder->addImage(DocxBuilder::png(40, 40));
+        $body = '<w:p>' . DocxBuilder::imageRun($image) . '</w:p>' . DocxBuilder::SECTION;
+
+        $package = new \PrintScript\Package($builder->build($body));
+        $document = \PrintScript\HtmlRenderer::render($package);
+        $html = implode('', array_map(static fn($s) => $s->html, $document->sections));
+
+        $this->assertStringNotContainsString('base64', $html);
+        $images = $document->images;
+        $this->assertCount(1, $images);
+        $this->assertSame('image/png', reset($images)['mime']);
+    }
+
+    /** Ruis comprimeert nauwelijks, net als een echte foto. */
+    private static function photoLikePng(int $width, int $height, int $seed): string
+    {
+        $raw = '';
+        for ($y = 0; $y < $height; $y++) {
+            $row = chr(0);
+            for ($x = 0; $x < $width; $x++) {
+                $row .= chr(($x * 7 + $y * 13 + $seed) % 256)
+                    . chr(($x * 31 + $y * 3 + $seed) % 256)
+                    . chr(($x * 17 + $y * 29 + $seed) % 256);
+            }
+            $raw .= $row;
+        }
+        $chunk = static fn(string $tag, string $payload): string =>
+            pack('N', strlen($payload)) . $tag . $payload . pack('N', crc32($tag . $payload));
+
+        return "\x89PNG\r\n\x1a\n"
+            . $chunk('IHDR', pack('NNCCCCC', $width, $height, 8, 2, 0, 0, 0))
+            . $chunk('IDAT', (string) gzcompress($raw, 1))
+            . $chunk('IEND', '');
+    }
+
     public function testAddingPageNumbersCanBeSwitchedOff(): void
     {
         $builder = new DocxBuilder();
