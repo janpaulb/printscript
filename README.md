@@ -55,8 +55,12 @@ WeasyPrint werkt en start de server op poort 5000.
 
 1. Zet je Google Doc op **Delen → Iedereen met de link → Kijker**.
 2. Plak de link in PrintScript en klik op **Maak drukklare PDF**.
-3. Bekijk het resultaat in het voorbeeldvenster, download het of open het om te
-   printen.
+3. Klik op **🖨 Printen**. Het printvenster opent meteen vanuit het
+   voorbeeldvenster — je hoeft niets te downloaden of in een nieuw tabblad te
+   openen. Downloaden kan natuurlijk ook.
+
+Wil je helemaal niet klikken: zet onder **Opties** de schakelaar *Printvenster
+meteen openen* aan, dan verschijnt het printvenster zodra de PDF klaar is.
 
 Ondersteunde linkvormen:
 
@@ -78,6 +82,7 @@ Voor privédocumenten heb je een OAuth-token nodig; zet die in de omgeving als
 | Afbeeldingen alleen op pagina 1 | aan | zet uit om alle afbeeldingen te behouden |
 | Paginanummer toevoegen als het document er geen heeft | aan | zet uit om exact de voettekst van het document te volgen |
 | Geen paginanummer op pagina 1 | uit | handig als pagina 1 een omslag is |
+| Printvenster meteen openen | uit | print zodra de PDF klaar is, zonder extra klik |
 
 ---
 

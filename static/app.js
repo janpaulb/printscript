@@ -20,6 +20,17 @@
   var mode = 'url';
   var chosenFile = null;
   var objectUrl = null;
+  var previewReady = false;
+  var printWhenReady = false;
+
+  preview.addEventListener('load', function () {
+    if (!objectUrl) { return; }
+    previewReady = true;
+    if (printWhenReady) {
+      printWhenReady = false;
+      printNow();
+    }
+  });
 
   /* ── Panel switching ─────────────────────────────────────────────── */
 
@@ -104,6 +115,24 @@
     };
   }
 
+  /* Print straight from the preview frame: the PDF is already loaded there,
+     so the print dialog opens without downloading or opening a tab first. */
+  function printNow() {
+    if (!objectUrl) { return; }
+    if (!previewReady) {
+      printWhenReady = true;
+      return;
+    }
+    try {
+      preview.contentWindow.focus();
+      preview.contentWindow.print();
+    } catch (error) {
+      // A browser that refuses to script its built-in PDF viewer still gets
+      // there via a normal tab.
+      window.open(objectUrl, '_blank', 'noopener');
+    }
+  }
+
   function fail(message) {
     el('error-text').textContent = message;
     show('error');
@@ -173,6 +202,8 @@
   function succeed(blob, filename, summary) {
     if (objectUrl) { URL.revokeObjectURL(objectUrl); }
     objectUrl = URL.createObjectURL(blob);
+    previewReady = false;
+    printWhenReady = el('opt-autoprint').checked;
 
     el('result-name').textContent = filename;
     el('download').href = objectUrl;
@@ -215,9 +246,7 @@
   convertButton.addEventListener('click', convert);
   el('retry').addEventListener('click', function () { show('input'); });
   el('again').addEventListener('click', function () { show('input'); });
-  el('print').addEventListener('click', function () {
-    if (objectUrl) { window.open(objectUrl, '_blank', 'noopener'); }
-  });
+  el('print').addEventListener('click', printNow);
 
   refresh();
 }());

@@ -71,6 +71,10 @@
         <input type="checkbox" id="opt-first">
         <span>Geen paginanummer op pagina 1 (omslag)</span>
       </label>
+      <label class="switch">
+        <input type="checkbox" id="opt-autoprint">
+        <span>Printvenster meteen openen als de PDF klaar is</span>
+      </label>
     </details>
 
     <button class="button button-primary" id="convert" disabled>Maak drukklare PDF</button>
@@ -94,8 +98,8 @@
         <p class="result-meta" id="result-meta"></p>
       </div>
       <div class="result-actions">
-        <a class="button button-primary" id="download" download>Downloaden</a>
-        <button class="button" id="print">Openen &amp; printen</button>
+        <button class="button button-primary" id="print">🖨 Printen</button>
+        <a class="button" id="download" download>Downloaden</a>
         <button class="button button-quiet" id="again">Nieuw document</button>
       </div>
     </div>
