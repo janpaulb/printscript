@@ -8,6 +8,11 @@ on:
     tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release:
+        description: 'Versie om uit te brengen, bijvoorbeeld v3.0.0 (leeg = alleen testen)'
+        required: false
+        default: ''
 
 jobs:
   phpunit:
@@ -42,7 +47,9 @@ jobs:
   release:
     name: Uitrolpakket bouwen
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Bij een versietag, of handmatig met een versie in het invoerveld. Dat
+    # tweede is er omdat niet iedereen tags mag pushen.
+    if: startsWith(github.ref, 'refs/tags/v') || inputs.release != ''
     needs: phpunit
     permissions:
       contents: write
@@ -59,10 +66,43 @@ jobs:
       - name: Pakket bouwen
         run: ./build-release.sh
 
+      - name: Controleren dat het pakket compleet is
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/check && mkdir -p /tmp/check
+          unzip -q printscript-php.zip -d /tmp/check
+          for path in index.php .htaccess vendor/autoload.php assets/app.js \
+                      src/Pipeline.php vendor/mpdf/mpdf/src/Mpdf.php; do
+            test -e "/tmp/check/printscript/$path" || {
+              echo "ONTBREEKT in het pakket: $path"; exit 1; }
+          done
+          # En het moet ook werkelijk een PDF kunnen maken.
+          php -r '
+            require "/tmp/check/printscript/vendor/autoload.php";
+            $m = new \Mpdf\Mpdf();
+            $m->WriteHTML("<p>PrintScript</p>");
+            $pdf = $m->Output("", "S");
+            exit(str_starts_with($pdf, "%PDF") ? 0 : 1);
+          '
+          echo "Pakket compleet en werkend."
+
       - name: Bij de release zetten
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ inputs.release || github.ref_name }}
+          name: PrintScript ${{ inputs.release || github.ref_name }}
           files: printscript-php.zip
           body: |
-            Download `printscript-php.zip`, pak hem uit en zet de inhoud in de
-            webmap van je server. Verder is er niets te configureren.
+            ## Installeren
+
+            Download hieronder **`printscript-php.zip`** — niet "Source code",
+            daar zit de PDF-motor niet in.
+
+            1. Pak het bestand uit.
+            2. Zet de inhoud in de webmap van je hosting (`public_html`, `www`
+               of `httpdocs`).
+            3. Ga naar het adres in je browser.
+
+            Verder is er niets te configureren, en je hebt geen shell-toegang,
+            Composer of Python nodig. Werkt op elke hosting met PHP 8.1 of
+            nieuwer.
