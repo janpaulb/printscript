@@ -1,63 +1,54 @@
-# ── Stage 1: Python dependencies ──────────────────────────────────────────────
-FROM python:3.11-slim AS deps
+# PrintScript — Google Docs in, print-ready PDF out.
+#
+# WeasyPrint renders through Pango, so the image needs Pango and a font set.
+# It does *not* need an office suite, a display server or any helper process,
+# which is exactly why this image is small and boring.
 
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
-
-# ── Stage 2: Runtime image ─────────────────────────────────────────────────────
 FROM python:3.11-slim
 
-# PDF conversion is handled by WeasyPrint + mammoth (pure Python, no display
-# or VCL plugin required). We only need system fonts for proper rendering.
-#
-#   fonts-liberation  — metric-compatible Arial/Times/Courier clones
-#                       prevents text reflow vs. the original .docx
-#   fonts-noto        — broad Unicode coverage for non-Latin documents
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1
+
+# ── System libraries ──────────────────────────────────────────────────────────
+#   libpango / libharfbuzz  — text shaping and layout for WeasyPrint
+#   fonts-liberation        — metric-compatible Arial/Times/Courier substitutes
+#   fonts-dejavu-core       — broad Latin coverage
+#   fonts-noto-core + CJK   — everything else a script might contain
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        libpango-1.0-0 \
+        libpangoft2-1.0-0 \
+        libharfbuzz0b \
+        libfribidi0 \
+        shared-mime-info \
         fonts-liberation \
-        fonts-noto \
+        fonts-dejavu-core \
+        fonts-noto-core \
  && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy installed Python packages from the deps stage
-COPY --from=deps /usr/local/lib/python3.11/site-packages \
-                 /usr/local/lib/python3.11/site-packages
-COPY --from=deps /usr/local/bin /usr/local/bin
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements-dev.txt
 
-# Copy application source
-COPY app.py processor.py gdocs.py ./
+COPY printscript/ printscript/
+COPY tests/ tests/
+COPY app.py gunicorn.conf.py pytest.ini ./
 COPY templates/ templates/
-COPY static/    static/
+COPY static/ static/
 
-# Non-root user
-RUN useradd -m -u 1001 printscript \
+# The full test suite runs at build time: an image that cannot convert a
+# document is never produced in the first place.
+RUN python -m pytest -q
+
+RUN useradd --create-home --uid 1001 printscript \
  && chown -R printscript:printscript /app
 USER printscript
 
 EXPOSE 5000
 
-# Verify WeasyPrint conversion works at build time
-RUN python3 -c "
-import tempfile, os, sys
-sys.path.insert(0, '/app')
-import processor
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
+    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:5000/healthz', timeout=4)"]
 
-with tempfile.TemporaryDirectory() as d:
-    # Create a minimal DOCX via python-docx
-    from docx import Document
-    doc = Document()
-    doc.add_paragraph('build test')
-    src = os.path.join(d, 'test.docx')
-    doc.save(src)
-    pdf = processor._convert_with_weasyprint(src, d)
-    assert os.path.exists(pdf) and os.path.getsize(pdf) > 1024, 'PDF too small or missing'
-    print('WeasyPrint conversion test: OK', flush=True)
-"
-
-# gunicorn handles graceful shutdown, worker recycling and multi-core use.
-COPY gunicorn.conf.py .
 CMD ["gunicorn", "--config", "gunicorn.conf.py", "app:app"]
