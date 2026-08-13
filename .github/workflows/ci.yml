@@ -38,8 +38,15 @@ jobs:
           path: ~/.composer/cache
           key: composer-${{ matrix.php }}-${{ hashFiles('composer.json') }}
 
-      - name: Packages installeren
-        run: composer install --no-interaction --no-progress --prefer-dist
+      # vendor/ staat in de repo; alleen het testgereedschap komt erbij.
+      - name: Testgereedschap installeren
+        run: COMPOSER=composer-dev.json composer install --no-interaction --no-progress
+
+      - name: Controleren dat vendor/ in de repo klopt
+        run: |
+          test -f vendor/autoload.php
+          php -r 'require "vendor/autoload.php";
+                  exit(class_exists("Mpdf\\Mpdf") ? 0 : 1);'
 
       - name: Tests draaien
         run: composer test

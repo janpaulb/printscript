@@ -1,5 +1,9 @@
-vendor/
+# vendor/ staat wél in de repo: niet elke hosting heeft Composer, en zonder
+# die map werkt er niets. Het testgereedschap hoort daar niet bij.
+vendor-dev/
+composer-dev.lock
 composer.phar
+
 .phpunit.result.cache
 .phpunit.cache/
 

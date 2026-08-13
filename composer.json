@@ -11,9 +11,6 @@
         "ext-zip": "*",
         "mpdf/mpdf": "^8.2"
     },
-    "require-dev": {
-        "phpunit/phpunit": "^10.5"
-    },
     "suggest": {
         "ext-curl": "Nodig om documenten bij Google Docs op te halen.",
         "ext-gd": "Nodig voor afbeeldingen in de PDF."
@@ -33,6 +30,6 @@
         "optimize-autoloader": true
     },
     "scripts": {
-        "test": "phpunit"
+        "test": "vendor-dev/bin/phpunit"
     }
 }
