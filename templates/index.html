@@ -1,118 +1,119 @@
 <!DOCTYPE html>
 <html lang="nl">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>PrintScript – Word naar PDF</title>
-  <link rel="stylesheet" href="/static/style.css" />
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PrintScript — drukklare PDF uit Google Docs</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖨️</text></svg>">
 </head>
 <body>
-  <div class="page">
 
-    <header>
-      <div class="logo">
-        <span class="logo-icon">&#9654;</span>
-        <span class="logo-text">PrintScript</span>
-      </div>
-      <p class="tagline">Van Word-document of Google Docs naar print-ready script</p>
-    </header>
-
-    <main>
-      <!-- Upload / convert card -->
-      <div class="card" id="upload-card">
-
-        <!-- Tab switcher -->
-        <div class="tabs" role="tablist">
-          <button class="tab active" id="tab-file" role="tab" aria-selected="true"
-                  aria-controls="panel-file" data-panel="panel-file">
-            &#128196; Word-bestand
-          </button>
-          <button class="tab" id="tab-url" role="tab" aria-selected="false"
-                  aria-controls="panel-url" data-panel="panel-url">
-            &#128279; Google Docs link
-          </button>
-        </div>
-
-        <!-- Panel: file upload -->
-        <div id="panel-file" class="tab-panel" role="tabpanel" aria-labelledby="tab-file">
-          <div
-            class="drop-zone"
-            id="drop-zone"
-            role="button"
-            tabindex="0"
-            aria-label="Sleep je .docx bestand hierheen of klik om te bladeren"
-          >
-            <div class="drop-icon">&#128196;</div>
-            <p class="drop-primary">Sleep je <strong>.docx</strong> bestand hierheen</p>
-            <p class="drop-secondary">of</p>
-            <label class="btn btn-outline" for="file-input">Bladeren</label>
-            <input type="file" id="file-input" accept=".docx"
-                   aria-label="Selecteer een Word-document" />
-            <p class="drop-hint" id="file-name-display">Geen bestand geselecteerd</p>
-          </div>
-        </div>
-
-        <!-- Panel: Google Docs URL -->
-        <div id="panel-url" class="tab-panel hidden" role="tabpanel" aria-labelledby="tab-url">
-          <div class="url-panel">
-            <label class="url-label" for="gdocs-url">Google Docs URL</label>
-            <input
-              type="url"
-              id="gdocs-url"
-              class="url-input"
-              placeholder="https://docs.google.com/document/d/…/edit"
-              autocomplete="off"
-              spellcheck="false"
-            />
-            <p class="url-hint">
-              Het document moet gedeeld zijn via
-              <strong>"Iedereen met de link kan bekijken"</strong>.
-            </p>
-          </div>
-        </div>
-
-        <!-- What the tool does -->
-        <div class="checklist">
-          <h3>Wat wordt gedaan bij de conversie</h3>
-          <ul>
-            <li><span class="check">&#10003;</span>
-              Alle <strong>commentaren</strong> worden verwijderd</li>
-            <li><span class="check">&#10003;</span>
-              Alle <strong>arceringen</strong> worden verwijderd (tekstkleur blijft behouden)</li>
-            <li><span class="check">&#10003;</span>
-              Alle <strong>afbeeldingen na pagina 1</strong> worden verwijderd &mdash;
-              afbeeldingen op pagina 1 blijven volledig intact</li>
-            <li><span class="check">&#10003;</span>
-              <strong>Paginanummering</strong> in de footer blijft staan</li>
-          </ul>
-        </div>
-
-        <button class="btn btn-primary" id="convert-btn" disabled>
-          Genereer PDF
-        </button>
-      </div>
-
-      <!-- Progress state -->
-      <div class="card hidden" id="progress-card">
-        <div class="spinner"></div>
-        <p class="status-text" id="status-text">Document verwerken&hellip;</p>
-      </div>
-
-      <!-- Error state -->
-      <div class="card hidden" id="error-card">
-        <div class="error-icon">&#9888;</div>
-        <p class="error-text" id="error-text"></p>
-        <button class="btn btn-outline" id="retry-btn">Opnieuw proberen</button>
-      </div>
-
-    </main>
-
-    <footer>
-      <p>Verwerking vindt lokaal op de server plaats &mdash; uw document wordt niet opgeslagen.</p>
-    </footer>
-
+<header class="masthead">
+  <div class="wordmark">
+    <span class="mark">▶</span>
+    <span>PrintScript</span>
   </div>
+  <p class="strapline">Plak een Google Docs-link, krijg een drukklare PDF terug.</p>
+</header>
 
-  <script src="/static/app.js"></script>
+<main>
+  <section class="panel" id="input-panel">
+
+    <div class="tabs" role="tablist">
+      <button class="tab is-active" role="tab" data-target="pane-url" aria-selected="true">
+        Google Docs-link
+      </button>
+      <button class="tab" role="tab" data-target="pane-file" aria-selected="false">
+        Word-bestand
+      </button>
+    </div>
+
+    <div class="pane" id="pane-url">
+      <label class="field-label" for="doc-url">Deel-link van het document</label>
+      <input type="url" id="doc-url" class="field"
+             placeholder="https://docs.google.com/document/d/…/edit"
+             autocomplete="off" spellcheck="false">
+      <p class="field-hint">
+        Het document moet gedeeld zijn via <strong>Iedereen met de link&nbsp;→&nbsp;Kijker</strong>.
+      </p>
+    </div>
+
+    <div class="pane is-hidden" id="pane-file">
+      <div class="dropzone" id="dropzone" tabindex="0" role="button"
+           aria-label="Kies of sleep een .docx-bestand">
+        <span class="dropzone-icon">📄</span>
+        <p>Sleep een <strong>.docx</strong> hierheen</p>
+        <label class="button button-quiet" for="file-input">Bladeren</label>
+        <input type="file" id="file-input" accept=".docx" hidden>
+        <p class="field-hint" id="file-name">Nog geen bestand gekozen</p>
+      </div>
+    </div>
+
+    <ul class="spec">
+      <li>Alle <strong>opmerkingen</strong> worden verwijderd</li>
+      <li>Alle <strong>markeringen</strong> worden verwijderd — tekstkleur blijft staan</li>
+      <li>Alle <strong>afbeeldingen na pagina 1</strong> worden verwijderd</li>
+      <li><strong>Paginanummering</strong> in de voettekst blijft behouden</li>
+    </ul>
+
+    <details class="options">
+      <summary>Opties</summary>
+      <label class="switch">
+        <input type="checkbox" id="opt-images" checked>
+        <span>Afbeeldingen alleen op pagina 1 toestaan</span>
+      </label>
+      <label class="switch">
+        <input type="checkbox" id="opt-numbers" checked>
+        <span>Paginanummer toevoegen als het document er geen heeft</span>
+      </label>
+      <label class="switch">
+        <input type="checkbox" id="opt-first">
+        <span>Geen paginanummer op pagina 1 (omslag)</span>
+      </label>
+      <label class="switch">
+        <input type="checkbox" id="opt-autoprint">
+        <span>Printvenster meteen openen als de PDF klaar is</span>
+      </label>
+    </details>
+
+    <button class="button button-primary" id="convert" disabled>Maak drukklare PDF</button>
+  </section>
+
+  <section class="panel is-hidden" id="busy-panel">
+    <div class="spinner" aria-hidden="true"></div>
+    <p class="status" id="busy-text">Document ophalen…</p>
+  </section>
+
+  <section class="panel panel-error is-hidden" id="error-panel">
+    <h2>Dat lukte niet</h2>
+    <p class="error-text" id="error-text"></p>
+    <button class="button button-quiet" id="retry">Opnieuw proberen</button>
+  </section>
+
+  <section class="panel is-hidden" id="result-panel">
+    <div class="result-head">
+      <div>
+        <h2 id="result-name">Klaar</h2>
+        <p class="result-meta" id="result-meta"></p>
+      </div>
+      <div class="result-actions">
+        <button class="button button-primary" id="print">🖨 Printen</button>
+        <a class="button" id="download" download>Downloaden</a>
+        <button class="button button-quiet" id="again">Nieuw document</button>
+      </div>
+    </div>
+    <ul class="warnings is-hidden" id="warnings"></ul>
+    <iframe class="preview" id="preview" title="Voorbeeld van de PDF"></iframe>
+  </section>
+</main>
+
+<footer class="colophon">
+  <p>Verwerking gebeurt op de server en niets wordt bewaard — het document
+     bestaat alleen tijdens de conversie in het geheugen.</p>
+  <p class="version">PrintScript {{ version }}</p>
+</footer>
+
+<script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>
 </html>

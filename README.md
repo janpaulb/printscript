@@ -1,235 +1,196 @@
 # PrintScript
 
-Converteer Word-documenten (.docx) naar drukklare PDF's — via de browser of als native macOS-app.
+Plak een Google Docs-link, krijg een drukklare PDF terug.
 
-**Wat PrintScript doet:**
+PrintScript is een webapp. Je geeft het een Google Docs-URL (of je sleept een
+`.docx` naar het venster) en het levert een PDF af die klaar is om te printen —
+met altijd dezelfde vier regels:
 
-- Verwijdert alle **opmerkingen** (comments)
-- Verwijdert alle **markeringen** (highlights/arceringen) — tekst­kleur blijft intact
-- Verwijdert alle **afbeeldingen na pagina 1** — de omslagpagina blijft ongewijzigd
-- Behoudt **paginanummering** in de voettekst
-- Accepteert ook een **Google Docs-link** — PrintScript downloadt het document zelf
+| | |
+|---|---|
+| **Opmerkingen** | worden volledig verwijderd, inclusief de comment-panelen |
+| **Markeringen** | alle arceringen weg, **tekstkleur blijft staan** |
+| **Afbeeldingen** | alleen op pagina 1; alles daarna wordt verwijderd |
+| **Paginanummering** | blijft in de voettekst staan (en wordt toegevoegd als die ontbreekt) |
 
-PDF-conversie gaat via **WeasyPrint + mammoth** (pure Python, geen externe processen, geen display vereist).
-
----
-
-## Downloaden (macOS — geen Terminal nodig)
-
-1. Ga naar **[Releases](../../releases/latest)**
-2. Download de DMG voor jouw Mac:
-   - **Apple Silicon (M1/M2/M3/M4)** → `PrintScript_arm64.dmg`
-   - **Intel** → `PrintScript_x86_64.dmg`
-3. Open de DMG en sleep **PrintScript** naar **Applications**
-4. Dubbelklik op PrintScript in je Applications-map
-
-> Eerste keer openen: rechtsklik op het app-icoontje → **"Open"** als macOS een beveiligingswaarschuwing geeft (Gatekeeper).
+Daarnaast worden *suggesties* opgelost zoals je ze zou accepteren: ingevoegde
+tekst blijft, geschrapte tekst verdwijnt.
 
 ---
 
-## Inhoud
+## Snel starten
 
-- [Downloaden (macOS)](#downloaden-macos--geen-terminal-nodig)
-- [Snel starten (webserver)](#snel-starten-webserver)
-- [Native macOS-app bouwen](#native-macos-app-bouwen)
-- [Google Docs-ondersteuning](#google-docs-ondersteuning)
-- [Projectstructuur](#projectstructuur)
-- [Hoe het werkt](#hoe-het-werkt)
-- [Limieten en beperkingen](#limieten-en-beperkingen)
-
----
-
-## Snel starten (webserver)
-
-### Optie A — Docker (aanbevolen, werkt altijd)
-
-```bash
-# Clone & start in één commando
-git clone https://github.com/janpaulb/printscript.git
-cd printscript
-docker compose up
-```
-
-Of gebruik de kant-en-klare image van GitHub Container Registry:
+### Docker (aanbevolen — je hoeft niets te installeren)
 
 ```bash
 docker run -p 5000:5000 ghcr.io/janpaulb/printscript:latest
 ```
 
-Open je browser op [http://localhost:5000](http://localhost:5000).
-
----
-
-### Optie B — Lokaal zonder Docker
-
-**Vereisten**
-
-- Python 3.11 of hoger
+of vanuit de repository:
 
 ```bash
-# 1. Clone de repository
 git clone https://github.com/janpaulb/printscript.git
 cd printscript
-
-# 2. Installeer Python-packages
-pip install -r requirements.txt
-
-# 3a. Ontwikkeling / lokaal
-python app.py
-
-# 3b. Productie (aanbevolen — gunicorn zit al in requirements.txt)
-gunicorn --config gunicorn.conf.py app:app
+docker compose up
 ```
 
-Sleep een `.docx`-bestand op de uploadzone of plak een Google Docs-URL. De PDF wordt automatisch gedownload.
+Open [http://localhost:5000](http://localhost:5000).
+
+### Zonder Docker
+
+Nodig: Python 3.11+ en de Pango-bibliotheken die WeasyPrint gebruikt
+(`brew install pango libffi` op macOS, `apt-get install libpango-1.0-0
+libpangoft2-1.0-0` op Debian/Ubuntu).
+
+```bash
+./run.sh
+```
+
+Het script maakt een virtuele omgeving, installeert de packages, controleert of
+WeasyPrint werkt en start de server op poort 5000.
 
 ---
 
-## Native macOS-app bouwen
+## Gebruik
 
-`build_mac.sh` bouwt een volledig **zelfstandige** `.app`. Je hoeft verder niets te installeren.
+1. Zet je Google Doc op **Delen → Iedereen met de link → Kijker**.
+2. Plak de link in PrintScript en klik op **Maak drukklare PDF**.
+3. Klik op **🖨 Printen**. Het printvenster opent meteen vanuit het
+   voorbeeldvenster — je hoeft niets te downloaden of in een nieuw tabblad te
+   openen. Downloaden kan natuurlijk ook.
 
-### Vereisten
+Wil je helemaal niet klikken: zet onder **Opties** de schakelaar *Printvenster
+meteen openen* aan, dan verschijnt het printvenster zodra de PDF klaar is.
 
-- macOS (Intel of Apple Silicon)
-- Python 3.11+
-
-### Bouwen
-
-```bash
-chmod +x build_mac.sh
-./build_mac.sh
-```
-
-Het script:
-1. Detecteert je architectuur (arm64 / x86_64)
-2. Installeert Python-packages (flask, python-docx, mammoth, weasyprint, pywebview, pyinstaller)
-3. Bouwt `dist/PrintScript.app` via PyInstaller
-
-```bash
-# Testen
-open dist/PrintScript.app
-
-# Installeren via DMG (sleep-naar-Applications venster)
-open dist/PrintScript_arm64.dmg   # Apple Silicon
-open dist/PrintScript_x86_64.dmg  # Intel
-```
-
-**Appgrootte:** ±30–50 MB.
-
-### Automatisch bouwen via GitHub Actions
-
-Push een versie-tag en GitHub bouwt de DMG automatisch voor beide architecturen:
-
-```bash
-git tag v1.0.0
-git push --tags
-```
-
-De DMGs verschijnen onder **Releases** zodra de build klaar is (~5–10 minuten). Teamleden en eindgebruikers downloaden gewoon de DMG — geen Terminal, geen Python installeren.
-
-Je kunt de build ook handmatig starten via **Actions → Build macOS App → Run workflow** op GitHub.
-
----
-
-## Google Docs-ondersteuning
-
-Ondersteunde URL-patronen:
+Ondersteunde linkvormen:
 
 ```
 https://docs.google.com/document/d/<ID>/edit
-https://docs.google.com/document/d/<ID>/edit?usp=sharing
+https://docs.google.com/document/u/1/d/<ID>/edit
 https://drive.google.com/file/d/<ID>/view
 https://drive.google.com/open?id=<ID>
+<ID>
 ```
 
-Het document moet ingesteld zijn op **"Iedereen met de link kan bekijken"**. Private documenten werken niet zonder OAuth-token.
+Voor privédocumenten heb je een OAuth-token nodig; zet die in de omgeving als
+`GOOGLE_ACCESS_TOKEN` of stuur hem mee als `access_token` in de API-aanroep.
+
+### Opties
+
+| Optie | Standaard | Effect |
+|---|---|---|
+| Afbeeldingen alleen op pagina 1 | aan | zet uit om alle afbeeldingen te behouden |
+| Paginanummer toevoegen als het document er geen heeft | aan | zet uit om exact de voettekst van het document te volgen |
+| Geen paginanummer op pagina 1 | uit | handig als pagina 1 een omslag is |
+| Printvenster meteen openen | uit | print zodra de PDF klaar is, zonder extra klik |
 
 ---
 
-## Projectstructuur
+## API
 
+```bash
+# Google Docs-link
+curl -X POST http://localhost:5000/api/convert \
+     -H 'Content-Type: application/json' \
+     -d '{"url": "https://docs.google.com/document/d/<ID>/edit"}' \
+     -o script.pdf
+
+# Word-bestand
+curl -X POST http://localhost:5000/api/convert \
+     -F file=@script.docx \
+     -F 'options={"page_numbers_on_first_page": false}' \
+     -o script.pdf
 ```
-printscript/
-├── app.py              # Flask-webserver (routes, file upload, Google Docs)
-├── processor.py        # Documentpijplijn: comments → highlights → afbeeldingen → PDF
-├── gdocs.py            # Google Docs downloader
-├── main.py             # Native macOS-app entry point (pywebview + Flask)
-├── templates/
-│   └── index.html      # Webinterface (twee tabbladen: upload / URL)
-├── static/
-│   ├── app.js          # Frontend-logica
-│   └── style.css       # Dark-theme styling
-├── test_processor.py   # Smoke tests voor de documentpijplijn
-├── PrintScript.spec    # PyInstaller spec voor de macOS-app
-├── build_mac.sh        # Bouwscript voor de macOS-app
-└── requirements.txt    # Python-packages
-```
+
+Bij succes komt er een PDF terug plus een header `X-PrintScript-Summary`: een
+base64-JSON met het aantal pagina's, wat er verwijderd is en eventuele
+waarschuwingen. Bij een fout komt er JSON terug (`{"error": "…"}`) met een
+passende statuscode: 400 voor een onbruikbare link of een kapot bestand, 403
+voor een document zonder leestoegang, 502 als Google zelf niet meewerkt.
+
+`GET /healthz` geeft `{"status": "ok"}` voor je loadbalancer.
 
 ---
 
 ## Hoe het werkt
 
-### Documentpijplijn (`processor.py`)
-
 ```
-.docx-invoer
-    │
-    ├─ remove_comments()             Verwijdert commentRangeStart/End,
-    │                                commentReference-runs en de comments-
-    │                                relatie uit het OOXML-pakket.
-    │
-    ├─ remove_highlighting()         Verwijdert w:highlight en w:shd op
-    │                                zowel run-niveau als paragraaf-niveau.
-    │                                w:color (tekstkleur) blijft intact.
-    │
-    ├─ remove_images_after_page_one  Detecteert de eerste pagina-einde
-    │                                (expliciete w:br of sectPr).
-    │                                Verwijdert w:drawing, w:pict,
-    │                                mc:AlternateContent en VML-vormen
-    │                                op alle volgende pagina's.
-    │
-    └─ convert_to_pdf()              WeasyPrint + mammoth: pure Python,
-                                     geen extern proces, geen display.
-                                     Werkt op macOS en Linux.
+Google Docs-URL ──► export?format=docx ──┐
+                                         ├─► clean ─► render ─► layout ─► PDF
+Geüploade .docx ─────────────────────────┘
 ```
 
-### Pagina-1-detectie
-
-PrintScript zoekt naar het eerste paginaeinde in het document:
-- een expliciete `<w:br w:type="page"/>` binnen een run, of
-- een `<w:sectPr>` met type `nextPage`, `evenPage` of `oddPage` in een paragraaf.
-
-De body-level `<w:sectPr>` (die de laatste sectie beschrijft) wordt bewust overgeslagen.
-
----
-
-## Limieten en beperkingen
-
-| Punt | Waarde |
+| Module | Verantwoordelijkheid |
 |---|---|
-| Max. bestandsgrootte upload | 50 MB |
-| Max. Google Docs download | 50 MB |
-| Google Docs verbindingstimeout | 10 seconden |
-| Google Docs leestimeout | 300 seconden |
-| Ondersteunde invoerformaten | `.docx` |
-| Uitvoerformaat | PDF |
+| `printscript/gdocs.py` | link → document-id → `.docx`-bytes (+ de titel uit de response-header) |
+| `printscript/package.py` | het `.docx`-zip als parts en relaties, volledig in het geheugen |
+| `printscript/clean.py` | opmerkingen en markeringen uit álle parts, ook uit `styles.xml` |
+| `printscript/styles.py` | `styles.xml` en `numbering.xml` platgeslagen tot bruikbare tabellen |
+| `printscript/docxhtml.py` | WordprocessingML → HTML + CSS |
+| `printscript/pdf.py` | opmaak naar PDF, plus de pagina-1-regel voor afbeeldingen |
+| `printscript/pipeline.py` | de vier stappen aan elkaar geknoopt |
+| `app.py` | Flask-routes en de webinterface |
+
+### Waarom dit werkt waar de vorige versie faalde
+
+**De pagina-1-regel wordt op de échte opmaak toegepast.** "Alle afbeeldingen na
+pagina 1" is een uitspraak over het *geprinte* document, niet over de opmaakcode.
+De oude versie zocht naar een expliciete pagina-einde-tag in het `.docx` en
+gokte de rest; stond er geen pagina-einde in — het normale geval — dan gebeurde
+er niets. PrintScript maakt de opmaak nu één keer, vraagt WeasyPrint op welke
+pagina elke afbeelding is beland, gooit alles vanaf pagina 2 weg en maakt de
+opmaak opnieuw. Die tweede ronde is veilig: weghalen kan tekst alleen naar
+vóren trekken, dus wat op pagina 1 stond blijft daar en er kan niets nieuws
+bijkomen.
+
+**Paginanummers worden geteld, niet overgeschreven.** `PAGE`- en
+`NUMPAGES`-velden worden CSS-tellers (`counter(page)`), zodat er staat wat er
+werkelijk geprint wordt in plaats van het getal dat Word ooit had onthouden.
+
+**Kop- en voetteksten zijn echte kop- en voetteksten.** Ze worden CSS *running
+elements* in de marges van `@page`, met hun eigen opmaak, hun eigen logo's en
+een aparte variant voor de titelpagina wanneer het document die heeft.
+
+**Geen extern conversieproces.** De vorige versies riepen LibreOffice aan — en
+verdronken in headless-modi, VCL-plug-ins, `DYLD_*`-variabelen en
+codesign-problemen op macOS. Er is nu geen los proces, geen office-suite en
+geen display: `lxml` leest het document, PrintScript rendert het zelf en
+WeasyPrint maakt er een PDF van.
+
+**Niets gaat het netwerk op.** De PDF-renderer krijgt een URL-fetcher die
+alleen `data:` toestaat, dus een document kan de server nooit een externe URL
+laten ophalen. Alle afbeeldingen zitten al als `data:`-URI in de HTML.
 
 ---
 
-## Tests draaien
+## Tests
 
 ```bash
-python test_processor.py
+pip install -r requirements-dev.txt
+python -m pytest
 ```
 
-Verwachte uitvoer:
+93 tests, ongeveer twee seconden. Ze bouwen `.docx`-pakketten met de hand
+(`tests/fixtures.py`) en controleren de **uitkomst in de PDF** — welke pagina's
+er zijn, welke afbeeldingen daadwerkelijk op welke pagina getekend worden, welke
+tekst er staat en welke er níet staat. De Docker-build draait dezelfde suite,
+dus een image die geen document kan omzetten wordt niet gepubliceerd.
 
-```
-  [OK] Run highlights removed: 0 remain
-  [OK] Paragraph shadings removed: 0 remain
-  [OK] Drawings after page 1 removed: 1 remains (page 1)
-  [OK] Comment markers removed: 0 remain
+---
 
-All tests passed.
-```
+## Grenzen
+
+| | |
+|---|---|
+| Maximale bestandsgrootte | 50 MB |
+| Invoer | `.docx` en Google Docs |
+| Uitvoer | PDF |
+| Zwevende afbeeldingen | worden in de tekstregel geplaatst, niet omlopend |
+| EMF-/WMF-afbeeldingen | worden overgeslagen (met een waarschuwing) — dat formaat kan niet in een PDF |
+| Tabstops | de standaardafstand; kop- en voetteksten met tabs worden wél als links/midden/rechts opgemaakt |
+| Titelpagina-instelling | wordt op de eerste sectie toegepast |
+| Grafieken en SmartArt | worden overgeslagen (met een waarschuwing) |
+
+Waarschuwingen komen in de webinterface onder het resultaat te staan en in de
+`X-PrintScript-Summary`-header, zodat je weet wat er is overgeslagen in plaats
+van dat het stilletjes verdwijnt.

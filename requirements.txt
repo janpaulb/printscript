@@ -1,10 +1,11 @@
-# Python dependencies
-flask>=3.0
-python-docx>=1.1
-lxml>=5.0
-requests>=2.28
-gunicorn>=21.2      # production WSGI server (Linux/macOS)
+# PrintScript runtime dependencies.
+#
+# The document pipeline is pure Python: lxml reads the OOXML, PrintScript's own
+# renderer turns it into HTML/CSS, and WeasyPrint lays it out as PDF.  There is
+# no external converter process, no office suite and no display server.
 
-# PDF conversion — pure-Python, no external processes or display required
-mammoth>=1.6        # DOCX → HTML (preserves paragraphs, tables, styles)
-weasyprint>=61.0    # HTML → PDF  (pydyf backend, no Cairo/Gtk/X11 required)
+flask>=3.0,<4
+lxml>=5.0
+requests>=2.31
+weasyprint>=66,<70
+gunicorn>=21.2      # production WSGI server
