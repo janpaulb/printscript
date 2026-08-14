@@ -118,7 +118,7 @@ final class MpdfEngine implements EngineInterface
     {
         $first = $document->sections[0] ?? null;
 
-        $configuration = [
+        $configuration = Fonts::configuration() + [
             'mode' => 'utf-8',
             'format' => [
                 $this->mm($first?->width ?? 595.3),
@@ -138,6 +138,8 @@ final class MpdfEngine implements EngineInterface
         $this->raiseBacktrackLimit($html);
 
         $mpdf = new Mpdf($configuration);
+        // Namen uit Word vertalen naar de lettertypen die we werkelijk hebben.
+        $mpdf->fonttrans = array_merge($mpdf->fonttrans, Fonts::translations());
         $mpdf->useSubstitutions = true;
         $mpdf->showImageErrors = false;
         $mpdf->WriteHTML($html);

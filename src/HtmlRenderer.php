@@ -148,7 +148,7 @@ final class HtmlRenderer
     private function emitBaseRules(): void
     {
         $defaults = [
-            'font-family' => '"DejaVu Sans", Arial, sans-serif',
+            'font-family' => "Arial, 'Liberation Sans', sans-serif",
             'font-size'   => '11pt',
             'color'       => '#000000',
         ];
@@ -408,12 +408,18 @@ final class HtmlRenderer
             return null;
         }
         $lowered = strtolower(trim($name));
+        // De naam uit het document eerst; daarachter de metrisch gelijke
+        // vervanger, zodat de regels op dezelfde plek afbreken.
         $fallback = in_array($lowered, self::MONO_FONTS, true)
-            ? '"DejaVu Sans Mono", monospace'
+            ? "'Liberation Mono', monospace"
             : (in_array($lowered, self::SERIF_FONTS, true)
-                ? '"DejaVu Serif", serif'
-                : '"DejaVu Sans", sans-serif');
-        return '"' . str_replace('"', '', $name) . "\", $fallback";
+                ? "'Liberation Serif', serif"
+                : "'Liberation Sans', sans-serif");
+
+        // Enkele aanhalingstekens: deze waarde belandt in een style="..."-
+        // attribuut, en dubbele zouden dat attribuut voortijdig afsluiten.
+        $clean = str_replace(["'", '"'], '', $name);
+        return "'$clean', $fallback";
     }
 
     private function readThemeFonts(): array
