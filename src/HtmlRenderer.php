@@ -169,7 +169,8 @@ final class HtmlRenderer
         $this->rules[] = 'body { ' . self::declarations($defaults) . ' }';
 
         $paragraph = $this->paragraphCss([$this->styles->documentDefaultParagraph]);
-        $this->documentLineSpacing = self::spacingFactor($paragraph['line-height'] ?? null, 1.0);
+        $this->documentLineSpacing =
+            $this->spacingFactor($this->styles->documentDefaultParagraph, 1.0);
         $this->lineSpacing = $this->documentLineSpacing;
         $paragraph += ['margin-top' => '0', 'margin-bottom' => '0'];
         $this->rules[] = '.ps-p { ' . self::declarations($paragraph) . ' }';
@@ -342,8 +343,14 @@ final class HtmlRenderer
                         // lettertype. Voor Arial en zijn metrische gelijken is
                         // dat ongeveer 1,15em. Zonder die factor wordt elke
                         // witregel te krap en schuift het document omhoog.
+                        //
+                        // Vier decimalen, geen drie: de gangbare waarde 1,3225
+                        // ligt precies op een afrondingsgrens, en verschillende
+                        // PHP-versies vallen daar naar verschillende kanten van
+                        // af. Dat leverde hetzelfde document met een andere
+                        // regelafstand op, afhankelijk van de server.
                         $css['line-height'] = number_format(
-                            (((float) $line) / 240.0) * self::NORMAL_LINE_HEIGHT, 3, '.', ''
+                            (((float) $line) / 240.0) * self::NORMAL_LINE_HEIGHT, 4, '.', ''
                         );
                     } else {
                         $exact = Ns::twipsToPt($line);
@@ -704,10 +711,7 @@ final class HtmlRenderer
 
         $inner = $marker;
         $inlineImages = $this->inlineImages;
-        $this->lineSpacing = self::spacingFactor(
-            $declarations['line-height'] ?? null,
-            $this->documentLineSpacing
-        );
+        $this->lineSpacing = $this->spacingFactor($properties, $this->documentLineSpacing);
         foreach ($paragraph->childNodes as $child) {
             if ($child instanceof \DOMElement) {
                 $inner .= $this->renderInline($child, $context);
@@ -1187,9 +1191,8 @@ final class HtmlRenderer
         // het lettertype: op deze regel staat geen letter die om ruimte
         // vraagt, de afbeelding ís de regel. "Regelafstand 1,15" geeft haar
         // dus vijftien procent lucht, half boven en half onder.
-        $spacing = $this->lineSpacing / self::NORMAL_LINE_HEIGHT;
-        if ($anchor === null && $height !== null && $spacing > 1.0) {
-            $leading = Ns::pt($height * ($spacing - 1.0) / 2);
+        if ($anchor === null && $height !== null && $this->lineSpacing > 1.0) {
+            $leading = Ns::pt($height * ($this->lineSpacing - 1.0) / 2);
             $style[] = 'margin-top: ' . $leading;
             $style[] = 'margin-bottom: ' . $leading;
         }
@@ -1239,17 +1242,28 @@ final class HtmlRenderer
     }
 
     /**
-     * De regelafstand als vermenigvuldiger, of het meegegeven vangnet.
+     * De regelafstand van een alinea als kale vermenigvuldiger: "1,15".
      *
-     * Een regelafstand in punten ("exact 18pt") zegt niets over hoeveel lucht
-     * een afbeelding krijgt: die staat vast, wat er ook op de regel komt.
+     * Niet de CSS-regelhoogte, want daar zit de natuurlijke regelhoogte van
+     * het lettertype al in verwerkt — en op een regel met een afbeelding
+     * staat geen letter die daarom vraagt. En niet uit de opgemaakte tekst
+     * teruggelezen: dan hangt de uitkomst af van hoe een PHP-versie afrondt.
+     *
+     * Een regelafstand in punten ("exact 18pt") telt niet mee: die staat
+     * vast, wat er ook op de regel komt.
      */
-    private static function spacingFactor(?string $lineHeight, float $fallback): float
+    private function spacingFactor(?\DOMElement $properties, float $fallback): float
     {
-        if ($lineHeight === null || !is_numeric($lineHeight)) {
+        $spacing = $this->childOf($properties, 'spacing');
+        if ($spacing === null) {
             return $fallback;
         }
-        return max((float) $lineHeight, 1.0);
+        $line = Ns::attr($spacing, 'w:line');
+        if ($line === null || !is_numeric($line)
+            || (Ns::attr($spacing, 'w:lineRule', 'auto') ?? 'auto') !== 'auto') {
+            return $fallback;
+        }
+        return max(((float) $line) / 240.0, 1.0);
     }
 
     /**

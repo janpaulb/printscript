@@ -112,7 +112,7 @@ final class LayoutTest extends TestCase
             'Tekst', null, '', '<w:spacing w:line="276" w:lineRule="auto"/>'
         ));
 
-        $this->assertStringContainsString('line-height: 1.322', $html,
+        $this->assertStringContainsString('line-height: 1.3225', $html,
             '276/240 = 1,15 regelafstand, maal 1,15 natuurlijke regelhoogte');
     }
 
@@ -153,8 +153,8 @@ final class LayoutTest extends TestCase
 
         // 1270000 EMU = 100pt hoog; regelafstand 1,15 geeft 15pt lucht, half
         // boven en half onder.
-        $this->assertStringContainsString('margin-top: 7.48pt', $html);
-        $this->assertStringContainsString('margin-bottom: 7.48pt', $html);
+        $this->assertStringContainsString('margin-top: 7.5pt', $html);
+        $this->assertStringContainsString('margin-bottom: 7.5pt', $html);
     }
 
     /**
