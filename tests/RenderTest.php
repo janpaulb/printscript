@@ -88,7 +88,10 @@ final class RenderTest extends TestCase
         $this->assertStringContainsString('margin-left: 36pt', $html);
         $this->assertStringContainsString('text-indent: 12pt', $html);
         $this->assertStringContainsString('margin-top: 6pt', $html);
-        $this->assertStringContainsString('line-height: 1.500', $html);
+        // w:line="360" is anderhalve regelafstand. Dat betekent anderhalf maal
+        // de natuurlijke regelhoogte van het lettertype (~1,15), niet anderhalf
+        // maal het korps — vandaar 1,5 x 1,15.
+        $this->assertStringContainsString('line-height: 1.725', $html);
     }
 
     // ── Pagina-instellingen ──────────────────────────────────────────────────

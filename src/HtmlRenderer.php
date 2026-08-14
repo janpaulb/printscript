@@ -28,6 +28,13 @@ final class HtmlRenderer
     private const DEFAULT_MARGIN      = 72.0;
     private const DEFAULT_TAB         = 36.0;
 
+    /**
+     * De regelhoogte die een lettertype uit zichzelf heeft, als veelvoud van
+     * het korps. Voor Arial, Times New Roman en hun metrische gelijken ligt
+     * die rond 1,15.
+     */
+    private const NORMAL_LINE_HEIGHT = 1.15;
+
     public const PAGE_NUMBER_MARK = '<span class="ps-pagenum"></span>';
     public const PAGE_COUNT_MARK  = '<span class="ps-pagecount"></span>';
     public const PAGE_BREAK_MARK  = '<!--ps-pagebreak-->';
@@ -322,7 +329,14 @@ final class HtmlRenderer
                 $line = Ns::attr($spacing, 'w:line');
                 if ($line !== null) {
                     if ((Ns::attr($spacing, 'w:lineRule', 'auto') ?? 'auto') === 'auto') {
-                        $css['line-height'] = number_format(((float) $line) / 240.0, 3, '.', '');
+                        // "Regelafstand 1,15" betekent niet 1,15 keer het korps,
+                        // maar 1,15 keer de natuurlijke regelhoogte van het
+                        // lettertype. Voor Arial en zijn metrische gelijken is
+                        // dat ongeveer 1,15em. Zonder die factor wordt elke
+                        // witregel te krap en schuift het document omhoog.
+                        $css['line-height'] = number_format(
+                            (((float) $line) / 240.0) * self::NORMAL_LINE_HEIGHT, 3, '.', ''
+                        );
                     } else {
                         $exact = Ns::twipsToPt($line);
                         if ($exact) {
@@ -686,6 +700,22 @@ final class HtmlRenderer
 
         if (trim(strip_tags(str_replace(self::PAGE_BREAK_MARK, '', $inner))) === ''
             && !str_contains($inner, '<img')) {
+            // Een lege alinea is niet niets: hij houdt een regel hoog.
+            //
+            // Hoe hoog, bepaalt de run erin — ook als die run geen tekst
+            // bevat, wat Google Docs in vrijwel elke alinea zet. Alleen als
+            // er helemaal geen run is, telt de opmaak van het alineamerk.
+            // Dat onderscheid is niet theoretisch: het merk staat hier vaak
+            // op een heel ander korps dan de tekst, en wie het merk altijd
+            // volgt, blaast alle witruimte op.
+            if (!$this->hasRun($paragraph)) {
+                $mark = $this->runCss([$this->childOf($properties, 'rPr')]);
+                foreach (['font-size', 'line-height', 'font-family'] as $property) {
+                    if (isset($mark[$property])) {
+                        $declarations[$property] = $mark[$property];
+                    }
+                }
+            }
             $inner .= '&nbsp;';
         }
 
@@ -991,7 +1021,7 @@ final class HtmlRenderer
             $width = $extent instanceof \DOMElement ? Ns::emuToPt($extent->getAttribute('cx')) : null;
             $height = $extent instanceof \DOMElement ? Ns::emuToPt($extent->getAttribute('cy')) : null;
             $id = Ns::attr($blip, 'r:embed') ?? Ns::attr($blip, 'r:link');
-            return $this->image($id, $width, $height, $context);
+            return $this->image($id, $width, $height, $context, self::anchorOffset($xpath, $drawing));
         }
 
         $textbox = $xpath->query('.//w:txbxContent', $drawing)?->item(0);
@@ -1025,8 +1055,38 @@ final class HtmlRenderer
         return $this->image(Ns::attr($data, 'r:id'), $width, $height, $context);
     }
 
-    private function image(?string $id, ?float $width, ?float $height, RenderContext $context): string
+    /**
+     * De verschuiving van een zwevende afbeelding (wp:anchor).
+     *
+     * Zo'n afbeelding staat op een eigen plek ten opzichte van de kolom en de
+     * alinea. De hoogte houden we in de tekststroom — dat komt dichter bij hoe
+     * Google Docs het afdrukt dan hem er helemaal uit halen — maar de
+     * verschuiving nemen we wel over, anders staat een omslaglogo tegen de
+     * linkermarge geplakt.
+     *
+     * @return array{0: float, 1: float} horizontaal en verticaal, in punten
+     */
+    private static function anchorOffset(\DOMXPath $xpath, \DOMElement $drawing): array
     {
+        $anchor = $xpath->query('.//wp:anchor', $drawing)?->item(0);
+        if (!$anchor instanceof \DOMElement) {
+            return [0.0, 0.0];
+        }
+        $of = static function (string $axis) use ($xpath, $anchor): float {
+            $node = $xpath->query(".//wp:position$axis/wp:posOffset", $anchor)?->item(0);
+            return $node === null ? 0.0 : (Ns::emuToPt(trim($node->textContent)) ?? 0.0);
+        };
+        return [max($of('H'), 0.0), max($of('V'), 0.0)];
+    }
+
+    /** @param array{0: float, 1: float} $offset */
+    private function image(
+        ?string $id,
+        ?float $width,
+        ?float $height,
+        RenderContext $context,
+        array $offset = [0.0, 0.0]
+    ): string {
         if ($id === null) {
             return '';
         }
@@ -1057,6 +1117,12 @@ final class HtmlRenderer
         }
         if ($height !== null) {
             $style[] = 'height: ' . Ns::pt($height);
+        }
+        if ($offset[0] > 0.0) {
+            $style[] = 'margin-left: ' . Ns::pt($offset[0]);
+        }
+        if ($offset[1] > 0.0) {
+            $style[] = 'margin-top: ' . Ns::pt($offset[1]);
         }
 
         // Niet als data:-URI in de HTML. Eén foto van een telefoon is als
@@ -1305,6 +1371,19 @@ final class HtmlRenderer
             }
         }
         return [];
+    }
+
+    /** Heeft de alinea een run, ook een zonder tekst? */
+    private function hasRun(\DOMElement $paragraph): bool
+    {
+        foreach ($paragraph->childNodes as $child) {
+            if ($child instanceof \DOMElement
+                && $child->localName === 'r'
+                && $child->namespaceURI === Ns::W) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private function tabCount(\DOMElement $paragraph): int
