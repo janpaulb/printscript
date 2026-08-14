@@ -90,15 +90,28 @@ final class Clean
                 continue;
             }
 
+            $touched = [];
             foreach (self::COMMENT_MARKERS as $marker) {
                 foreach (self::elements($document, Ns::W, $marker) as $node) {
-                    $node->parentNode?->removeChild($node);
+                    $parent = $node->parentNode;
+                    if ($parent instanceof \DOMElement
+                        && $parent->localName === 'r'
+                        && $parent->namespaceURI === Ns::W) {
+                        $touched[] = $parent;
+                    }
+                    $parent?->removeChild($node);
                     $report->commentMarkersRemoved++;
                 }
             }
 
-            // Een run met alleen nog opmaak erin levert een lege span op.
-            foreach (self::elements($document, Ns::W, 'r') as $run) {
+            // Een run die alleen bestond om naar een opmerking te wijzen, is nu
+            // leeg en kan weg.
+            //
+            // Alleen díe runs. Google Docs zet in vrijwel elke alinea een run
+            // zonder tekst, en juist die bepaalt hoe hoog een lege regel is.
+            // Wie ze allemaal opruimt, laat de witruimte van het hele document
+            // inklappen — en dat is precies wat hier gebeurde.
+            foreach ($touched as $run) {
                 $meaningful = false;
                 foreach ($run->childNodes as $child) {
                     if ($child instanceof \DOMElement && $child->localName !== 'rPr') {
