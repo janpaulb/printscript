@@ -22,6 +22,7 @@
   var objectUrl = null;
   var previewReady = false;
   var printWhenReady = false;
+  var printedSource = null;
 
   preview.addEventListener('load', function () {
     if (!objectUrl) { return; }
@@ -62,7 +63,39 @@
       : chosenFile === null;
   }
 
-  urlInput.addEventListener('input', refresh);
+  /* Elke vorm die Google gebruikt, plus een kaal document-id. Dezelfde
+     vormen als src/GoogleDocs.php aanneemt — hier alleen om te zien of er
+     iets bruikbaars staat, het echte uitpakken gebeurt op de server. */
+  var DOCUMENT_ID = '[a-zA-Z0-9_-]{12,}';
+  var LOOKS_LIKE_A_DOCUMENT = new RegExp(
+    '^' + DOCUMENT_ID + '$'
+    + '|docs\\.google\\.com/document/(?:u/\\d+/)?d/' + DOCUMENT_ID
+    + '|drive\\.google\\.com/file/d/' + DOCUMENT_ID
+    + '|drive\\.google\\.com/open\\?id=' + DOCUMENT_ID
+  );
+
+  /* Wat er al onderweg is of net gedaan is, gaat niet nog een keer: anders
+     start een tweede plakbeurt of een cursor in het veld dezelfde conversie
+     opnieuw. */
+  var converted = '';
+  var pasteTimer = null;
+
+  function convertIfItIsALink() {
+    var value = urlInput.value.trim();
+    if (mode !== 'url' || value === converted || !LOOKS_LIKE_A_DOCUMENT.test(value)) {
+      return;
+    }
+    convert();
+  }
+
+  urlInput.addEventListener('input', function () {
+    refresh();
+    // Een link plakken is genoeg. Het veld verandert dan in één klap van
+    // leeg naar een compleet adres, en daar hoeft niemand nog een knop bij
+    // te zoeken. Typen doet niets tot er echt een link staat.
+    window.clearTimeout(pasteTimer);
+    pasteTimer = window.setTimeout(convertIfItIsALink, 250);
+  });
   urlInput.addEventListener('keydown', function (event) {
     if (event.key === 'Enter' && !convertButton.disabled) { convert(); }
   });
@@ -131,6 +164,14 @@
       // there via a normal tab.
       window.open(objectUrl, '_blank', 'noopener');
     }
+    remind();
+  }
+
+  /* Om hier te komen moet het document op "iedereen met de link" staan. Na
+     het printen is dat niet meer nodig, en het is precies het soort ding dat
+     je vergeet. Alleen bij een link: een geupload bestand staat nergens open. */
+  function remind() {
+    el('reminder').classList.toggle('is-hidden', printedSource !== 'url');
   }
 
   function fail(message) {
@@ -159,6 +200,9 @@
 
   function convert() {
     show('busy');
+    converted = urlInput.value.trim();
+    printedSource = mode;
+    el('reminder').classList.add('is-hidden');
     el('busy-text').textContent = mode === 'url'
       ? 'Document ophalen bij Google…'
       : 'Document inlezen…';
@@ -244,8 +288,9 @@
   }
 
   convertButton.addEventListener('click', convert);
-  el('retry').addEventListener('click', function () { show('input'); });
-  el('again').addEventListener('click', function () { show('input'); });
+  // Na een mislukking mag dezelfde link het wél opnieuw proberen.
+  el('retry').addEventListener('click', function () { converted = ''; show('input'); });
+  el('again').addEventListener('click', function () { converted = ''; show('input'); });
   el('print').addEventListener('click', printNow);
 
   refresh();

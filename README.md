@@ -58,12 +58,16 @@ uploaden van een `.docx` nog gewoon.
 ## Gebruik
 
 1. Zet je Google Doc op **Delen → Iedereen met de link → Kijker**.
-2. Plak de link en klik op **Maak drukklare PDF**.
-3. Klik op **🖨 Printen**. Het printvenster opent meteen vanuit het
+2. Plak de link. Meer niet: PrintScript ziet dat er een link staat en begint
+   meteen. Het printvenster opent zodra de PDF klaar is, vanuit het
    voorbeeldvenster — je hoeft niets te downloaden of in een tabblad te openen.
+3. **Zet het document daarna weer op privé.** De pagina zegt het er na het
+   printen nog een keer bij, in het rood.
 
-Wil je helemaal niet klikken: zet onder **Opties** de schakelaar *Printvenster
-meteen openen* aan.
+Liever zelf op een knop drukken? Zet onder **Opties** de schakelaar
+*Printvenster meteen openen* uit; **Maak drukklare PDF** en **🖨 Printen**
+blijven gewoon staan. Typen doet niets tot er echt een link staat, dus een
+half ingevoerd adres begint nergens aan.
 
 Ondersteunde linkvormen:
 
@@ -85,7 +89,7 @@ Voor privédocumenten heb je een OAuth-token nodig: zet die in de omgeving als
 | Afbeeldingen alleen op pagina 1 | aan | uit = alle afbeeldingen behouden |
 | Paginanummer toevoegen als het document er geen heeft | aan | uit = exact de voettekst van het document volgen |
 | Geen paginanummer op pagina 1 | uit | handig als pagina 1 een omslag is |
-| Printvenster meteen openen | uit | print zodra de PDF klaar is |
+| Printvenster meteen openen | aan | uit = pas printen als je op **🖨 Printen** klikt |
 
 ---
 
