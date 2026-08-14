@@ -153,6 +153,21 @@ blijven buiten schot: alleen afbeeldingen in de lopende tekst tellen mee.
 er staat wat er werkelijk geprint wordt in plaats van het getal dat Word ooit
 had onthouden.
 
+### Lettertypen bepalen waar de regels afbreken
+
+Dit is geen schoonheidskwestie. De breedte van elke letter bepaalt waar een
+regel afbreekt, en dus waar een pagina eindigt. Zet je Arial-tekst in een ander
+lettertype, dan loopt het hele document uit de pas met wat je in Google Docs
+ziet.
+
+PrintScript levert daarom de **Liberation**-familie mee (`fonts/`): metrisch
+identiek aan Arial, Times New Roman en Courier New. Elke letter is even breed
+als in het origineel, alleen de vorm verschilt minimaal — het is wat
+LibreOffice ook doet als een document om een lettertype vraagt dat er niet is.
+Andere namen (Calibri, Verdana, Georgia, Cambria) vallen terug op het
+Liberation-lettertype dat er qua karakter het dichtst bij komt; daar zijn de
+breedtes een benadering.
+
 ### Kop- en voetteksten zijn echte kop- en voetteksten
 
 Ze worden per sectie apart opgemaakt, met hun eigen opmaak, hun eigen logo's en
@@ -197,7 +212,7 @@ bewijzen de tests wat er op papier komt, niet welke functie is aangeroepen.
 | Tabstops | de standaardafstand; kop- en voetteksten met tabs worden wél links/midden/rechts |
 | Titelpagina-instelling | wordt op de eerste sectie toegepast |
 | Grafieken en SmartArt | worden overgeslagen (met een waarschuwing) |
-| Lettertypen | de DejaVu-familie; ontbrekende lettertypen vallen daarop terug |
+| Lettertypen | Liberation (exact zo breed als Arial, Times New Roman en Courier New); andere lettertypen vallen daarop terug |
 
 Waarschuwingen komen in de webinterface onder het resultaat te staan en in de
 `X-PrintScript-Summary`-header, zodat je weet wat er is overgeslagen in plaats

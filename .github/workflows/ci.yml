@@ -79,7 +79,9 @@ jobs:
           rm -rf /tmp/check && mkdir -p /tmp/check
           unzip -q printscript-php.zip -d /tmp/check
           for path in index.php .htaccess vendor/autoload.php assets/app.js \
-                      src/Pipeline.php vendor/mpdf/mpdf/src/Mpdf.php; do
+                      src/Pipeline.php vendor/mpdf/mpdf/src/Mpdf.php \
+                      fonts/LiberationSans-Regular.ttf fonts/LiberationSerif-Regular.ttf \
+                      fonts/LiberationMono-Regular.ttf; do
             test -e "/tmp/check/printscript/$path" || {
               echo "ONTBREEKT in het pakket: $path"; exit 1; }
           done
