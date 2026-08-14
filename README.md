@@ -151,7 +151,26 @@ blijven buiten schot: alleen afbeeldingen in de lopende tekst tellen mee.
 
 `PAGE`- en `NUMPAGES`-velden worden merktekens die de PDF-motor invult, zodat
 er staat wat er werkelijk geprint wordt in plaats van het getal dat Word ooit
-had onthouden.
+had onthouden. Begint het document de telling ergens anders — scripts zetten
+de omslag vaak op nul, zodat de eerste bladzijde tekst pagina 1 is — dan wordt
+dat overgenomen. En nummert het document zichzelf al, dan blijft een lege
+voettekst op de omslag leeg: dat is een keuze, geen omissie.
+
+### Witruimte is inhoud
+
+De onzichtbare helft van een document bepaalt waar de pagina's eindigen, en
+daar zitten de valkuilen. Vier regels die uit het meten van een echt script
+naast de PDF van Google Docs zijn gekomen:
+
+| | |
+|---|---|
+| Lege alinea | de run erin bepaalt de hoogte, maar alleen waar die iets zegt; voor de rest telt het alineamerk |
+| Regelafstand | "1,15" is 1,15 maal de natuurlijke regelhoogte van het lettertype (≈1,15em), niet 1,15 maal het korps |
+| Slotregelovergang | een alinea die op een `<br>` eindigt, eindigt op een lege regel — motoren gooien die weg |
+| Afbeelding in de regel | krijgt de regelafstand van zijn alinea, net als een letter |
+
+Onderkasting staat aan, want ook dat verschuift regeleindes: zonder kerning
+breekt een regel een woord eerder af dan in het origineel.
 
 ### Lettertypen bepalen waar de regels afbreken
 
@@ -187,7 +206,7 @@ Het testgereedschap staat bewust in een eigen map (`vendor-dev/`), los van de
 `vendor/` die mee de server op gaat. Zo bevat die laatste precies wat er hoort
 en niets meer — 29 MB in plaats van ruim 2 GB.
 
-54 tests, ongeveer een halve seconde. Ze bouwen `.docx`-pakketten met de hand
+74 tests, ongeveer een seconde. Ze bouwen `.docx`-pakketten met de hand
 (`tests/DocxBuilder.php`) en controleren de **uitkomst in de PDF**
 (`tests/PdfInspector.php`): welke pagina's er zijn, welke afbeeldingen
 daadwerkelijk op welke pagina getekend worden, welke tekst er staat en welke er
@@ -207,7 +226,8 @@ bewijzen de tests wat er op papier komt, niet welke functie is aangeroepen.
 | Maximale bestandsgrootte | 50 MB (en wat je hosting toestaat) |
 | Invoer | `.docx` en Google Docs |
 | Uitvoer | PDF |
-| Zwevende afbeeldingen | worden in de tekstregel geplaatst, niet omlopend |
+| Zwevende afbeeldingen | staan op hun eigen plek en buiten de tekststroom, maar de tekst loopt er niet omheen |
+| Verkeerd-om inspringen | een opsomming zet zijn bolletje binnen de kantlijn in plaats van ervoor; de PDF-motor kent geen negatieve inspringing |
 | EMF-/WMF-afbeeldingen | worden overgeslagen (met een waarschuwing) |
 | Tabstops | de standaardafstand; kop- en voetteksten met tabs worden wél links/midden/rechts |
 | Titelpagina-instelling | wordt op de eerste sectie toegepast |

@@ -256,6 +256,51 @@ final class SpecsTest extends TestCase
         $this->assertStringContainsString('2', $pages[1]);
     }
 
+    /**
+     * Een script met een omslag zet de teller vaak op nul: het titelblad telt
+     * niet mee, en de eerste bladzijde tekst is pagina 1. Wie dat negeert,
+     * drukt een nummering af die één verschilt van wat de schrijver ziet.
+     */
+    public function testPageNumberingCanStartAtZero(): void
+    {
+        $builder = new DocxBuilder();
+        $footer = $builder->addFooter(DocxBuilder::pageFieldFooter('Pagina '));
+        $cover = $builder->addFooter('<w:p><w:r><w:rPr/></w:r></w:p>');
+        $body = DocxBuilder::paragraph('Omslag') . DocxBuilder::pageBreak()
+            . DocxBuilder::paragraph('Een') . DocxBuilder::pageBreak()
+            . DocxBuilder::paragraph('Twee')
+            . DocxBuilder::sectionWithFooter($footer, null, true,
+                '<w:footerReference w:type="first" r:id="' . $cover . '"/>'
+                . '<w:pgNumType w:start="0"/>');
+
+        [, $pdf] = $this->convert($builder, $body);
+        $pages = $pdf->pageTexts();
+
+        $this->assertSame('Omslag', trim($pages[0]), 'de omslag draagt geen nummer');
+        $this->assertStringContainsString('Pagina 1', $pages[1]);
+        $this->assertStringContainsString('Pagina 2', $pages[2]);
+    }
+
+    /**
+     * Nummert het document zichzelf, dan is een lege voettekst op de omslag
+     * geen omissie maar een keuze — en die respecteren we.
+     */
+    public function testADocumentThatNumbersItselfKeepsItsBlankCover(): void
+    {
+        $builder = new DocxBuilder();
+        $footer = $builder->addFooter(DocxBuilder::pageFieldFooter('Pagina '));
+        $cover = $builder->addFooter('<w:p><w:r><w:rPr/></w:r></w:p>');
+        $body = DocxBuilder::paragraph('Omslag') . DocxBuilder::pageBreak()
+            . DocxBuilder::paragraph('Inhoud')
+            . DocxBuilder::sectionWithFooter($footer, null, true,
+                '<w:footerReference w:type="first" r:id="' . $cover . '"/>');
+
+        [, $pdf] = $this->convert($builder, $body);
+
+        $this->assertSame('Omslag', trim($pdf->pageTexts()[0]));
+        $this->assertStringContainsString('Pagina 2', $pdf->pageTexts()[1]);
+    }
+
     // ── Grote documenten ─────────────────────────────────────────────────────
 
     /**
