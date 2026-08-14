@@ -96,6 +96,12 @@ final class HtmlRenderer
     private array $listCounters = [];
     private float $defaultTab = self::DEFAULT_TAB;
     private float $contentWidth = self::DEFAULT_PAGE_WIDTH - 2 * self::DEFAULT_MARGIN;
+    private float $marginLeft = self::DEFAULT_MARGIN;
+    private float $marginTop = self::DEFAULT_MARGIN;
+    private int $inlineImages = 0;
+    private array $anchors = [];
+    private float $documentLineSpacing = 1.0;
+    private float $lineSpacing = 1.0;
 
     public function __construct(
         private Package $package,
@@ -163,6 +169,9 @@ final class HtmlRenderer
         $this->rules[] = 'body { ' . self::declarations($defaults) . ' }';
 
         $paragraph = $this->paragraphCss([$this->styles->documentDefaultParagraph]);
+        $this->documentLineSpacing =
+            $this->spacingFactor($this->styles->documentDefaultParagraph, 1.0);
+        $this->lineSpacing = $this->documentLineSpacing;
         $paragraph += ['margin-top' => '0', 'margin-bottom' => '0'];
         $this->rules[] = '.ps-p { ' . self::declarations($paragraph) . ' }';
 
@@ -334,8 +343,14 @@ final class HtmlRenderer
                         // lettertype. Voor Arial en zijn metrische gelijken is
                         // dat ongeveer 1,15em. Zonder die factor wordt elke
                         // witregel te krap en schuift het document omhoog.
+                        //
+                        // Vier decimalen, geen drie: de gangbare waarde 1,3225
+                        // ligt precies op een afrondingsgrens, en verschillende
+                        // PHP-versies vallen daar naar verschillende kanten van
+                        // af. Dat leverde hetzelfde document met een andere
+                        // regelafstand op, afhankelijk van de server.
                         $css['line-height'] = number_format(
-                            (((float) $line) / 240.0) * self::NORMAL_LINE_HEIGHT, 3, '.', ''
+                            (((float) $line) / 240.0) * self::NORMAL_LINE_HEIGHT, 4, '.', ''
                         );
                     } else {
                         $exact = Ns::twipsToPt($line);
@@ -498,6 +513,8 @@ final class HtmlRenderer
             $geometry['width'] - $geometry['marginLeft'] - $geometry['marginRight'],
             36.0
         );
+        $this->marginLeft = $geometry['marginLeft'];
+        $this->marginTop = $geometry['marginTop'];
 
         $break = 'none';
         if ($index > 0) {
@@ -545,6 +562,7 @@ final class HtmlRenderer
             evenAndOddHeaders: Ns::toggle($this->childOf($this->settings, 'evenAndOddHeaders'), false),
             breakBefore: $break,
             columns: max($columnCount, 1),
+            pageNumberStart: self::pageNumberStart($this->childOf($properties, 'pgNumType')),
         );
     }
 
@@ -684,6 +702,7 @@ final class HtmlRenderer
 
         $pageBreakBefore = $this->childOf($properties, 'pageBreakBefore');
         $breakBefore = $pageBreakBefore !== null && Ns::toggle($pageBreakBefore, true);
+        $this->lineSpacing = $this->spacingFactor($properties, $this->documentLineSpacing);
 
         // Kop- en voetteksten bouwen hun links/midden/rechts met tabs op.
         if ($context->headerFooter && $this->tabCount($paragraph) >= 1
@@ -692,28 +711,35 @@ final class HtmlRenderer
         }
 
         $inner = $marker;
+        $inlineImages = $this->inlineImages;
         foreach ($paragraph->childNodes as $child) {
             if ($child instanceof \DOMElement) {
                 $inner .= $this->renderInline($child, $context);
             }
         }
 
+        // Een zwevende afbeelding vult de alinea niet: hij staat buiten de
+        // stroom, en de alinea houdt gewoon zijn eigen regel.
         if (trim(strip_tags(str_replace(self::PAGE_BREAK_MARK, '', $inner))) === ''
-            && !str_contains($inner, '<img')) {
+            && $this->inlineImages === $inlineImages) {
             // Een lege alinea is niet niets: hij houdt een regel hoog.
             //
-            // Hoe hoog, bepaalt de run erin — ook als die run geen tekst
-            // bevat, wat Google Docs in vrijwel elke alinea zet. Alleen als
-            // er helemaal geen run is, telt de opmaak van het alineamerk.
-            // Dat onderscheid is niet theoretisch: het merk staat hier vaak
-            // op een heel ander korps dan de tekst, en wie het merk altijd
-            // volgt, blaast alle witruimte op.
-            if (!$this->hasRun($paragraph)) {
-                $mark = $this->runCss([$this->childOf($properties, 'rPr')]);
-                foreach (['font-size', 'line-height', 'font-family'] as $property) {
-                    if (isset($mark[$property])) {
-                        $declarations[$property] = $mark[$property];
-                    }
+            // Hoe hoog, staat op twee plekken: in het alineamerk en in de
+            // (tekstloze) run die Google Docs in vrijwel elke alinea zet. Ze
+            // spreken elkaar geregeld tegen, en dan wint de run — maar alleen
+            // voor wat die run zélf noemt. Noemt de run geen korps, dan telt
+            // dat van het merk.
+            //
+            // Beide helften zijn opgemeten: wie het merk altijd volgt, blaast
+            // alle witruimte op; wie de run altijd volgt, laat de witruimte
+            // van lege regels met alleen een merkkorps inklappen.
+            $height = $this->runCss([
+                $this->childOf($properties, 'rPr'),
+                $this->firstRunProperties($paragraph),
+            ]);
+            foreach (['font-size', 'line-height', 'font-family'] as $property) {
+                if (isset($height[$property])) {
+                    $declarations[$property] = $height[$property];
                 }
             }
             $inner .= '&nbsp;';
@@ -727,11 +753,16 @@ final class HtmlRenderer
         $close = "</$tag>";
 
         $pieces = explode(self::PAGE_BREAK_MARK, $inner);
-        $html = ($breakBefore ? self::PAGE_BREAK_MARK : '');
+        $html = ($breakBefore ? self::PAGE_BREAK_MARK : '') . $this->flushAnchors();
         foreach ($pieces as $position => $piece) {
             if ($position > 0) {
                 $html .= self::PAGE_BREAK_MARK;
             }
+            // Een alinea die op een regelovergang eindigt, eindigt op een
+            // lege regel. Een opmaakmotor gooit die weg — er staat immers
+            // niets meer achter — en dan verschuift de rest van het document
+            // omhoog. Eén spatie zonder breedte houdt de regel overeind.
+            $piece = preg_replace('~<br>((?:</[a-z]+>)*)$~', '<br>&nbsp;$1', $piece) ?? $piece;
             $html .= $open . $piece . $close;
         }
         return $html;
@@ -771,7 +802,7 @@ final class HtmlRenderer
         $widths = ['33%', '34%', '33%'];
         $aligns = ['left', 'center', 'right'];
         $style = $declarations === [] ? '' : ' style="' . self::declarations($declarations) . '"';
-        $html = '<table class="ps-hf"' . $style . '><tr>';
+        $html = $this->flushAnchors() . '<table class="ps-hf"' . $style . '><tr>';
         foreach ($cells as $position => $cell) {
             $html .= '<td width="' . $widths[$position] . '" align="' . $aligns[$position] . '">'
                 . ($cell === '' ? '&nbsp;' : $cell) . '</td>';
@@ -1021,7 +1052,8 @@ final class HtmlRenderer
             $width = $extent instanceof \DOMElement ? Ns::emuToPt($extent->getAttribute('cx')) : null;
             $height = $extent instanceof \DOMElement ? Ns::emuToPt($extent->getAttribute('cy')) : null;
             $id = Ns::attr($blip, 'r:embed') ?? Ns::attr($blip, 'r:link');
-            return $this->image($id, $width, $height, $context, self::anchorOffset($xpath, $drawing));
+            return $this->image($id, $width, $height, $context,
+                $this->anchorPosition($xpath, $drawing));
         }
 
         $textbox = $xpath->query('.//w:txbxContent', $drawing)?->item(0);
@@ -1056,36 +1088,67 @@ final class HtmlRenderer
     }
 
     /**
-     * De verschuiving van een zwevende afbeelding (wp:anchor).
+     * De plek van een zwevende afbeelding (wp:anchor).
      *
-     * Zo'n afbeelding staat op een eigen plek ten opzichte van de kolom en de
-     * alinea. De hoogte houden we in de tekststroom — dat komt dichter bij hoe
-     * Google Docs het afdrukt dan hem er helemaal uit halen — maar de
-     * verschuiving nemen we wel over, anders staat een omslaglogo tegen de
-     * linkermarge geplakt.
+     * Zo'n afbeelding staat buiten de tekststroom: hij duwt niets opzij en
+     * niets omlaag. Dat is geen detail. Het omslaglogo van een script is
+     * ruim negentig punt hoog; wie hem in de stroom laat staan, duwt de titel
+     * van de omslag anderhalve regel naar beneden en schuift alles wat volgt
+     * mee tot voorbij de onderrand van de pagina.
      *
-     * @return array{0: float, 1: float} horizontaal en verticaal, in punten
+     * Twee assen, elk met hun eigen ijkpunt:
+     *
+     * - horizontaal telt vanaf de kolom (dus vanaf de linkermarge) of vanaf
+     *   de paginarand; dat is een vaste plek en wordt `left`.
+     * - verticaal telt meestal vanaf de alinea waar de afbeelding aan hangt.
+     *   Waar die alinea uitkomt weet alleen de opmaakmotor, en die zet een
+     *   absoluut geplaatst blok zonder `top` precies dáár neer. Dus wordt de
+     *   verschuiving een `margin-top`, en blijft ze relatief.
+     *
+     * @return ?array{0: string, 1: string} de CSS voor links en boven
      */
-    private static function anchorOffset(\DOMXPath $xpath, \DOMElement $drawing): array
+    private function anchorPosition(\DOMXPath $xpath, \DOMElement $drawing): ?array
     {
         $anchor = $xpath->query('.//wp:anchor', $drawing)?->item(0);
         if (!$anchor instanceof \DOMElement) {
-            return [0.0, 0.0];
+            return null;
         }
-        $of = static function (string $axis) use ($xpath, $anchor): float {
-            $node = $xpath->query(".//wp:position$axis/wp:posOffset", $anchor)?->item(0);
-            return $node === null ? 0.0 : (Ns::emuToPt(trim($node->textContent)) ?? 0.0);
+
+        $axis = static function (string $name) use ($xpath, $anchor): array {
+            $position = $xpath->query(".//wp:position$name", $anchor)?->item(0);
+            if (!$position instanceof \DOMElement) {
+                return ['page', 0.0];
+            }
+            $node = $xpath->query('./wp:posOffset', $position)?->item(0);
+            return [
+                $position->getAttribute('relativeFrom') ?: 'page',
+                $node === null ? 0.0 : (Ns::emuToPt(trim($node->textContent)) ?? 0.0),
+            ];
         };
-        return [max($of('H'), 0.0), max($of('V'), 0.0)];
+
+        [$relativeH, $offsetH] = $axis('H');
+        $left = $relativeH === 'page' ? $offsetH : $this->marginLeft + $offsetH;
+
+        [$relativeV, $offsetV] = $axis('V');
+        $top = match ($relativeV) {
+            // Vanaf de paginarand of de bovenmarge: een vaste hoogte op het
+            // vel, los van waar de tekst is gebleven.
+            'page' => 'top: ' . Ns::pt(max($offsetV, 0.0)),
+            'margin', 'topMargin' => 'top: ' . Ns::pt(max($this->marginTop + $offsetV, 0.0)),
+            // Vanaf de alinea of de regel: meebewegen met de tekst.
+            default => $offsetV === 0.0 ? '' : 'margin-top: ' . Ns::pt($offsetV),
+        };
+
+        return ['left: ' . Ns::pt(max($left, 0.0)), $top];
     }
 
-    /** @param array{0: float, 1: float} $offset */
+    /** @param ?array{0: string, 1: string} $anchor */
     private function image(
         ?string $id,
         ?float $width,
         ?float $height,
         RenderContext $context,
-        array $offset = [0.0, 0.0]
+        ?array $anchor = null
     ): string {
         if ($id === null) {
             return '';
@@ -1118,11 +1181,20 @@ final class HtmlRenderer
         if ($height !== null) {
             $style[] = 'height: ' . Ns::pt($height);
         }
-        if ($offset[0] > 0.0) {
-            $style[] = 'margin-left: ' . Ns::pt($offset[0]);
-        }
-        if ($offset[1] > 0.0) {
-            $style[] = 'margin-top: ' . Ns::pt($offset[1]);
+
+        // Een afbeelding in de regel krijgt de regelafstand van zijn alinea
+        // mee, net als tekst. Een opmaakmotor geeft zo'n regel uit zichzelf
+        // precies de hoogte van de afbeelding en geen punt meer; een
+        // tekstverwerker rekent de regelafstand er overheen.
+        //
+        // Alleen de vermenigvuldiger telt, niet de natuurlijke regelhoogte van
+        // het lettertype: op deze regel staat geen letter die om ruimte
+        // vraagt, de afbeelding ís de regel. "Regelafstand 1,15" geeft haar
+        // dus vijftien procent lucht, half boven en half onder.
+        if ($anchor === null && $height !== null && $this->lineSpacing > 1.0) {
+            $leading = Ns::pt($height * ($this->lineSpacing - 1.0) / 2);
+            $style[] = 'margin-top: ' . $leading;
+            $style[] = 'margin-bottom: ' . $leading;
         }
 
         // Niet als data:-URI in de HTML. Eén foto van een telefoon is als
@@ -1136,16 +1208,85 @@ final class HtmlRenderer
         $tag = '<img src="' . $token . '"'
             . ($style === [] ? '' : ' style="' . implode('; ', $style) . '"') . '>';
 
-        if (!$context->tagImages) {
+        if ($anchor !== null) {
+            $tag = '<div class="ps-anchor" style="position: absolute; '
+                . implode('; ', array_filter([$anchor[0], $anchor[1]]))
+                . ($width === null ? '' : '; width: ' . Ns::pt($width))
+                . '">' . $tag . '</div>';
+        } else {
+            $this->inlineImages++;
+        }
+
+        if ($context->tagImages) {
+            // Elke afbeelding in de lopende tekst krijgt een merkteken, zodat
+            // de motor na de eerste opmaakronde kan zien op welke pagina hij
+            // staat.
+            $this->imageSequence++;
+            $marker = 'psimg' . $this->imageSequence;
+            $this->imageIds[] = $marker;
+            $tag = "<!--$marker-->$tag<!--/$marker-->";
+        }
+
+        if ($anchor === null) {
             return $tag;
         }
 
-        // Elke afbeelding in de lopende tekst krijgt een merkteken, zodat de
-        // motor na de eerste opmaakronde kan zien op welke pagina hij staat.
-        $this->imageSequence++;
-        $marker = 'psimg' . $this->imageSequence;
-        $this->imageIds[] = $marker;
-        return "<!--$marker-->$tag<!--/$marker-->";
+        // Een zwevend blok hoort niet binnen een alinea: een opmaakmotor
+        // sluit de alinea er stilzwijgend voor af, en de rest van die alinea
+        // verliest dan zijn korps. Het blok gaat er daarom vóór staan. Voor
+        // de plaatsing maakt dat niets uit — zonder `top` komt het toch op de
+        // hoogte terecht waar de tekststroom op dat moment is, en dat is
+        // precies de bovenkant van deze alinea.
+        $this->anchors[] = $tag;
+        return '';
+    }
+
+    /**
+     * De regelafstand van een alinea als kale vermenigvuldiger: "1,15".
+     *
+     * Niet de CSS-regelhoogte, want daar zit de natuurlijke regelhoogte van
+     * het lettertype al in verwerkt — en op een regel met een afbeelding
+     * staat geen letter die daarom vraagt. En niet uit de opgemaakte tekst
+     * teruggelezen: dan hangt de uitkomst af van hoe een PHP-versie afrondt.
+     *
+     * Een regelafstand in punten ("exact 18pt") telt niet mee: die staat
+     * vast, wat er ook op de regel komt.
+     */
+    private function spacingFactor(?\DOMElement $properties, float $fallback): float
+    {
+        $spacing = $this->childOf($properties, 'spacing');
+        if ($spacing === null) {
+            return $fallback;
+        }
+        $line = Ns::attr($spacing, 'w:line');
+        if ($line === null || !is_numeric($line)
+            || (Ns::attr($spacing, 'w:lineRule', 'auto') ?? 'auto') !== 'auto') {
+            return $fallback;
+        }
+        return max(((float) $line) / 240.0, 1.0);
+    }
+
+    /**
+     * Waar de paginanummering van deze sectie begint.
+     *
+     * Scripts met een omslag zetten die vaak op nul: het titelblad telt niet
+     * mee, en de eerste bladzijde tekst is pagina 1. Wie dat negeert, drukt
+     * een nummering af die één verschilt van wat de schrijver ziet.
+     */
+    private static function pageNumberStart(?\DOMElement $numbering): ?int
+    {
+        $start = Ns::attr($numbering, 'w:start');
+        return $start !== null && $start !== '' && ctype_digit(ltrim($start, '-'))
+            ? (int) $start
+            : null;
+    }
+
+    /** De zwevende blokken van de alinea die nu af is. */
+    private function flushAnchors(): string
+    {
+        $html = implode('', $this->anchors);
+        $this->anchors = [];
+        return $html;
     }
 
     private static function vmlSize(string $style): array
@@ -1373,17 +1514,24 @@ final class HtmlRenderer
         return [];
     }
 
-    /** Heeft de alinea een run, ook een zonder tekst? */
-    private function hasRun(\DOMElement $paragraph): bool
+    /**
+     * De opmaak van de eerste run in de alinea, ook als die run geen tekst
+     * bevat.
+     *
+     * Die bepaalt hoe hoog een regel zonder tekst wordt: een lege run van
+     * Google Docs (elf punt) of een run met alleen een tab erin (hier
+     * zesentwintig). Pas als er helemaal geen run is, telt het alineamerk.
+     */
+    private function firstRunProperties(\DOMElement $paragraph): ?\DOMElement
     {
         foreach ($paragraph->childNodes as $child) {
             if ($child instanceof \DOMElement
                 && $child->localName === 'r'
                 && $child->namespaceURI === Ns::W) {
-                return true;
+                return $this->childOf($child, 'rPr');
             }
         }
-        return false;
+        return null;
     }
 
     private function tabCount(\DOMElement $paragraph): int

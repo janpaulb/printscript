@@ -30,6 +30,8 @@ final class RenderedSection
         public readonly bool $evenAndOddHeaders = false,
         public readonly string $breakBefore = 'none',
         public readonly int $columns = 1,
+        /** Het nummer dat de eerste pagina van de sectie draagt (w:pgNumType). */
+        public readonly ?int $pageNumberStart = null,
     ) {
     }
 

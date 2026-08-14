@@ -142,6 +142,12 @@ final class MpdfEngine implements EngineInterface
         $mpdf->fonttrans = array_merge($mpdf->fonttrans, Fonts::translations());
         $mpdf->useSubstitutions = true;
         $mpdf->showImageErrors = false;
+        // Onderkasting, zoals een tekstverwerker het doet: de "P," in "SGP,"
+        // schuift een fractie naar elkaar toe. Over een regel loopt dat op
+        // tot een woord, en dan breekt de regel een woord eerder af dan in
+        // het origineel.
+        $mpdf->useKerning = true;
+        $this->startPageNumbering($mpdf, $first?->pageNumberStart);
         $mpdf->WriteHTML($html);
 
         $bookmarks = [];
@@ -299,10 +305,9 @@ final class MpdfEngine implements EngineInterface
             default => $section->footer,
         };
 
-        if (!$options->addPageNumbers) {
-            return $html;
-        }
-        if ($html !== null && $this->hasPageNumber($html)) {
+        if (!$options->addPageNumbers || $this->numbersItself($section)) {
+            // Het document nummert zichzelf. Dan is een lege voettekst op de
+            // omslag geen omissie maar een keuze, en die respecteren we.
             return $html;
         }
         if ($html === null && $which !== 'default') {
@@ -401,10 +406,43 @@ final class MpdfEngine implements EngineInterface
         );
     }
 
+    /**
+     * De nummering laten beginnen waar het document zegt dat ze begint.
+     *
+     * Een script met een omslag zet de teller vaak op nul, zodat het
+     * titelblad niet meetelt en de eerste bladzijde tekst pagina 1 is. mPDF
+     * kent daar één regel voor: vanaf pagina X telt de nummering opnieuw
+     * vanaf N. Voor "begin bij nul" is dat: vanaf pagina twee is het pagina
+     * één — precies hetzelfde, en de omslag houdt zijn eigen voettekst.
+     */
+    private function startPageNumbering(Mpdf $mpdf, ?int $start): void
+    {
+        if ($start === null || $start === 1) {
+            return;
+        }
+        $mpdf->PageNumSubstitutions[] = $start < 1
+            ? ['from' => 2 - $start, 'reset' => 1, 'type' => '1', 'suppress' => 'off']
+            : ['from' => 1, 'reset' => $start, 'type' => '1', 'suppress' => 'off'];
+    }
+
     private function hasPageNumber(string $html): bool
     {
         return str_contains($html, HtmlRenderer::PAGE_NUMBER_MARK)
             || str_contains($html, HtmlRenderer::PAGE_COUNT_MARK);
+    }
+
+    /** Staat er ergens in de kop- of voetteksten van deze sectie al een teller? */
+    private function numbersItself(RenderedSection $section): bool
+    {
+        foreach ([
+            $section->footer, $section->firstFooter, $section->evenFooter,
+            $section->header, $section->firstHeader, $section->evenHeader,
+        ] as $html) {
+            if ($html !== null && $this->hasPageNumber($html)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

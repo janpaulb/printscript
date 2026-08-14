@@ -49,26 +49,56 @@ final class LayoutTest extends TestCase
     }
 
     /**
-     * De hoogte van een lege regel komt van de run, niet van het alineamerk.
+     * De hoogte van een lege regel: de run wint, maar alleen waar hij iets
+     * zegt.
      *
-     * Het merk staat in scripts vaak op een heel ander korps dan de tekst; wie
-     * dat volgt, blaast de witruimte op. Alleen als er helemaal geen run is,
-     * telt het merk.
+     * Google Docs zet in een lege alinea een run zonder tekst én zonder
+     * korps, en legt het korps in het alineamerk. Wie dan de run volgt, krijgt
+     * elf punt waar zestien hoorde te staan. Op de omslag van een script,
+     * waar zulke regels met tientallen tegelijk staan, verschuift dat de
+     * logo's een halve bladzijde.
+     *
+     * Noemt de run wél een korps, dan is dat het korps van de regel: dan
+     * heeft iemand het met opzet anders gezet dan het merk.
      */
-    public function testAnEmptyParagraphTakesItsHeightFromTheRun(): void
+    public function testAnEmptyParagraphFallsBackToTheParagraphMark(): void
     {
-        $withRun = $this->paragraphStyle(
+        $silentRun = $this->paragraphStyle(
             '<w:p><w:pPr><w:rPr><w:sz w:val="52"/></w:rPr></w:pPr>'
             . '<w:r><w:rPr><w:rtl w:val="0"/></w:rPr></w:r></w:p>'
+        );
+        $ownSize = $this->paragraphStyle(
+            '<w:p><w:pPr><w:rPr><w:sz w:val="52"/></w:rPr></w:pPr>'
+            . '<w:r><w:rPr><w:sz w:val="20"/></w:rPr></w:r></w:p>'
         );
         $withoutRun = $this->paragraphStyle(
             '<w:p><w:pPr><w:rPr><w:sz w:val="52"/></w:rPr></w:pPr></w:p>'
         );
 
-        $this->assertStringNotContainsString('font-size: 26pt', $withRun,
-            'met een run erin geldt het korps van die run, niet dat van het merk');
+        $this->assertStringContainsString('font-size: 26pt', $silentRun,
+            'de run noemt geen korps, dus telt dat van het merk');
+        $this->assertStringContainsString('font-size: 10pt', $ownSize,
+            'de run noemt een eigen korps en dat wint van het merk');
         $this->assertStringContainsString('font-size: 26pt', $withoutRun,
             'zonder run is het alineamerk het enige dat de hoogte bepaalt');
+    }
+
+    /**
+     * Een alinea die op een regelovergang eindigt, eindigt op een lege regel.
+     *
+     * Een opmaakmotor gooit die weg — er staat immers niets meer achter. In
+     * een script staan zulke alinea's bij honderden, en dan loopt het hele
+     * document pagina's uit de pas met wat de schrijver ziet.
+     */
+    public function testATrailingLineBreakKeepsItsEmptyLine(): void
+    {
+        $html = $this->paragraphStyle(
+            '<w:p><w:r><w:rPr><w:sz w:val="24"/></w:rPr>'
+            . '<w:t>Tekst</w:t><w:br w:type="textWrapping"/></w:r></w:p>'
+        );
+
+        $this->assertStringContainsString('<br>&nbsp;</span>', $html,
+            'de laatste regelovergang krijgt iets om overeind te blijven');
     }
 
     /**
@@ -82,7 +112,7 @@ final class LayoutTest extends TestCase
             'Tekst', null, '', '<w:spacing w:line="276" w:lineRule="auto"/>'
         ));
 
-        $this->assertStringContainsString('line-height: 1.322', $html,
+        $this->assertStringContainsString('line-height: 1.3225', $html,
             '276/240 = 1,15 regelafstand, maal 1,15 natuurlijke regelhoogte');
     }
 
@@ -97,8 +127,40 @@ final class LayoutTest extends TestCase
     }
 
     /**
-     * Een zwevende afbeelding staat op een eigen plek ten opzichte van de
-     * kolom. Zonder die verschuiving plakt een omslaglogo tegen de linkermarge.
+     * Een afbeelding in de tekstregel krijgt de regelafstand van zijn alinea,
+     * net als een letter.
+     *
+     * Een opmaakmotor geeft zo'n regel precies de hoogte van de afbeelding en
+     * geen punt meer. Bij een script met tientallen stills scheelt dat een
+     * hele pagina — en op de omslag het verschil tussen een logo dat er nog
+     * op past en een dat naar pagina 2 verdwijnt (en dus wordt weggehaald).
+     */
+    public function testInlineImagesGetTheLineSpacingAsLeading(): void
+    {
+        $builder = new DocxBuilder();
+        $image = $builder->addImage(DocxBuilder::png(40, 40));
+        $inline = '<w:p><w:pPr><w:spacing w:line="276" w:lineRule="auto"/></w:pPr>'
+            . '<w:r><w:drawing><wp:inline distB="0" distT="0" distL="0" distR="0">'
+            . '<wp:extent cx="1270000" cy="1270000"/>'
+            . '<wp:docPr id="1" name="still"/>'
+            . '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
+            . '<pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="still"/><pic:cNvPicPr/></pic:nvPicPr>'
+            . '<pic:blipFill><a:blip r:embed="' . $image . '"/><a:stretch><a:fillRect/></a:stretch>'
+            . '</pic:blipFill><pic:spPr/></pic:pic></a:graphicData></a:graphic>'
+            . '</wp:inline></w:drawing></w:r></w:p>';
+
+        $html = $this->paragraphStyle($inline, $builder);
+
+        // 1270000 EMU = 100pt hoog; regelafstand 1,15 geeft 15pt lucht, half
+        // boven en half onder.
+        $this->assertStringContainsString('margin-top: 7.5pt', $html);
+        $this->assertStringContainsString('margin-bottom: 7.5pt', $html);
+    }
+
+    /**
+     * Een zwevende afbeelding staat buiten de tekststroom: hij duwt niets
+     * omlaag. Een omslaglogo is al gauw negentig punt hoog — in de stroom duwt
+     * dat de titel anderhalve regel naar beneden en alles daaronder mee.
      */
     public function testFloatingImagesKeepTheirOffset(): void
     {
@@ -118,9 +180,15 @@ final class LayoutTest extends TestCase
 
         $html = $this->paragraphStyle($anchored . DocxBuilder::SECTION, $builder);
 
-        // 541500 EMU = 42.64pt naar rechts, 381000 EMU = 30pt omlaag.
-        $this->assertStringContainsString('margin-left: 42.64pt', $html);
+        // 541500 EMU = 42,64pt vanaf de kolom, dus vanaf de linkermarge;
+        // 381000 EMU = 30pt onder de bovenkant van de alinea. Dat laatste
+        // blijft een marge: waar de alinea uitkomt weet alleen de motor.
+        $this->assertStringContainsString('position: absolute', $html);
+        $this->assertStringContainsString('left: 113.49pt', $html,
+            '71pt linkermarge plus 42,64pt verschuiving');
         $this->assertStringContainsString('margin-top: 30pt', $html);
+        // En de alinea houdt zijn eigen lege regel: het logo vult haar niet.
+        $this->assertStringContainsString('&nbsp;</p>', $html);
     }
 
     private function paragraphStyle(string $body, ?DocxBuilder $builder = null): string
