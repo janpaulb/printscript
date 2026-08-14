@@ -702,6 +702,7 @@ final class HtmlRenderer
 
         $pageBreakBefore = $this->childOf($properties, 'pageBreakBefore');
         $breakBefore = $pageBreakBefore !== null && Ns::toggle($pageBreakBefore, true);
+        $this->lineSpacing = $this->spacingFactor($properties, $this->documentLineSpacing);
 
         // Kop- en voetteksten bouwen hun links/midden/rechts met tabs op.
         if ($context->headerFooter && $this->tabCount($paragraph) >= 1
@@ -711,7 +712,6 @@ final class HtmlRenderer
 
         $inner = $marker;
         $inlineImages = $this->inlineImages;
-        $this->lineSpacing = $this->spacingFactor($properties, $this->documentLineSpacing);
         foreach ($paragraph->childNodes as $child) {
             if ($child instanceof \DOMElement) {
                 $inner .= $this->renderInline($child, $context);
