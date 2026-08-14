@@ -206,6 +206,7 @@ function showPage(): void
                  autocomplete="off" spellcheck="false">
           <p class="field-hint">
             Het document moet gedeeld zijn via <strong>Iedereen met de link&nbsp;→&nbsp;Kijker</strong>.
+            Plakken is genoeg — dan begint het meteen.
           </p>
         </div>
 
@@ -235,7 +236,7 @@ function showPage(): void
             <span>Paginanummer toevoegen als het document er geen heeft</span></label>
           <label class="switch"><input type="checkbox" id="opt-first">
             <span>Geen paginanummer op pagina 1 (omslag)</span></label>
-          <label class="switch"><input type="checkbox" id="opt-autoprint">
+          <label class="switch"><input type="checkbox" id="opt-autoprint" checked>
             <span>Printvenster meteen openen als de PDF klaar is</span></label>
         </details>
 
@@ -265,6 +266,9 @@ function showPage(): void
             <button class="button button-quiet" id="again">Nieuw document</button>
           </div>
         </div>
+        <p class="reminder is-hidden" id="reminder" role="alert">
+          Google Docs weer op privé zetten, ouwe gek!
+        </p>
         <ul class="warnings is-hidden" id="warnings"></ul>
         <iframe class="preview" id="preview" title="Voorbeeld van de PDF"></iframe>
       </section>
