@@ -1052,8 +1052,10 @@ final class HtmlRenderer
             $width = $extent instanceof \DOMElement ? Ns::emuToPt($extent->getAttribute('cx')) : null;
             $height = $extent instanceof \DOMElement ? Ns::emuToPt($extent->getAttribute('cy')) : null;
             $id = Ns::attr($blip, 'r:embed') ?? Ns::attr($blip, 'r:link');
+            $rectangle = $xpath->query('.//a:srcRect', $drawing)?->item(0);
             return $this->image($id, $width, $height, $context,
-                $this->anchorPosition($xpath, $drawing));
+                $this->anchorPosition($xpath, $drawing),
+                ImageCrop::rectangle($rectangle instanceof \DOMElement ? $rectangle : null));
         }
 
         $textbox = $xpath->query('.//w:txbxContent', $drawing)?->item(0);
@@ -1084,7 +1086,8 @@ final class HtmlRenderer
             ? self::vmlSize($shape->getAttribute('style'))
             : [null, null];
 
-        return $this->image(Ns::attr($data, 'r:id'), $width, $height, $context);
+        return $this->image(Ns::attr($data, 'r:id'), $width, $height, $context,
+            null, ImageCrop::vmlRectangle($data));
     }
 
     /**
@@ -1142,13 +1145,17 @@ final class HtmlRenderer
         return ['left: ' . Ns::pt(max($left, 0.0)), $top];
     }
 
-    /** @param ?array{0: string, 1: string} $anchor */
+    /**
+     * @param ?array{0: string, 1: string} $anchor
+     * @param ?array{0: float, 1: float, 2: float, 3: float} $crop
+     */
     private function image(
         ?string $id,
         ?float $width,
         ?float $height,
         RenderContext $context,
-        ?array $anchor = null
+        ?array $anchor = null,
+        ?array $crop = null
     ): string {
         if ($id === null) {
             return '';
@@ -1165,6 +1172,24 @@ final class HtmlRenderer
         if (in_array($subtype, self::UNSUPPORTED_IMAGES, true)) {
             return $this->warnOnce('Een afbeelding in ' . strtoupper(ltrim($subtype, 'x-'))
                 . '-formaat kan niet in een PDF worden gezet en is overgeslagen.');
+        }
+
+        // Bijsnijden gooit in Word en Google Docs niets weg: het hele plaatje
+        // blijft in het bestand zitten en er staat alleen bij welk deel te
+        // zien is. Wie dat niet uitvoert, drukt het hele plaatje in het vakje
+        // dat voor het uitgesneden stuk bedoeld was.
+        if ($crop !== null) {
+            $cropped = ImageCrop::apply($blob, $crop);
+            if ($cropped !== null) {
+                $blob = $cropped;
+                $mime = 'image/png';
+            } else {
+                $this->warnOnce(ImageCrop::isAvailable()
+                    ? 'Een bijgesneden afbeelding kon niet worden bijgesneden en '
+                        . 'staat er in zijn geheel op.'
+                    : 'Bijgesneden afbeeldingen blijven heel: deze server heeft de '
+                        . 'PHP-uitbreiding gd niet.');
+            }
         }
 
         // Liever evenredig verkleinen dan de verhouding laten platdrukken.

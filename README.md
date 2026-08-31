@@ -47,7 +47,7 @@ php -S localhost:8000     # draait meteen; vendor/ zit er al in
 |---|---|
 | PHP | 8.1 of nieuwer |
 | Verplicht | `zip`, `dom`, `mbstring` |
-| Voor afbeeldingen | `gd` |
+| Voor afbeeldingen | `gd` (ook voor bijgesneden afbeeldingen) |
 | Voor Google Docs-links | `curl` |
 
 Dat is de standaarduitrusting van vrijwel elke hosting. Zonder `curl` werkt het
@@ -134,6 +134,7 @@ Geüploade .docx ─────────────────────
 | `src/Clean.php` | opmerkingen en markeringen uit álle onderdelen, ook uit `styles.xml` |
 | `src/Styles.php`, `src/Numbering.php` | `styles.xml` en `numbering.xml` platgeslagen |
 | `src/HtmlRenderer.php` | WordprocessingML → HTML + CSS |
+| `src/ImageCrop.php` | bijgesneden afbeeldingen echt bijsnijden |
 | `src/Engine/MpdfEngine.php` | opmaak naar PDF, plus de pagina-1-regel voor afbeeldingen |
 | `src/Pipeline.php` | de vier stappen aan elkaar |
 | `index.php` | de webinterface en de API |
@@ -191,6 +192,15 @@ Andere namen (Calibri, Verdana, Georgia, Cambria) vallen terug op het
 Liberation-lettertype dat er qua karakter het dichtst bij komt; daar zijn de
 breedtes een benadering.
 
+### Bijgesneden afbeeldingen worden echt bijgesneden
+
+Wie in Google Docs of Word een afbeelding bijsnijdt, gooit niets weg. Het hele
+plaatje blijft in het bestand zitten; er staat alleen bij welk deel te zien is
+(`a:srcRect`). Een opmaakmotor kent dat niet en tekent het hele plaatje in het
+vakje dat voor het uitgesneden stuk bedoeld was — een bijgesneden omslagfoto
+komt er dan platgeslagen uit. PrintScript snijdt hem daarom zelf bij, vóór de
+motor hem te zien krijgt, mét behoud van doorzichtigheid.
+
 ### Kop- en voetteksten zijn echte kop- en voetteksten
 
 Ze worden per sectie apart opgemaakt, met hun eigen opmaak, hun eigen logo's en
@@ -210,7 +220,7 @@ Het testgereedschap staat bewust in een eigen map (`vendor-dev/`), los van de
 `vendor/` die mee de server op gaat. Zo bevat die laatste precies wat er hoort
 en niets meer — 29 MB in plaats van ruim 2 GB.
 
-74 tests, ongeveer een seconde. Ze bouwen `.docx`-pakketten met de hand
+79 tests, ongeveer een seconde. Ze bouwen `.docx`-pakketten met de hand
 (`tests/DocxBuilder.php`) en controleren de **uitkomst in de PDF**
 (`tests/PdfInspector.php`): welke pagina's er zijn, welke afbeeldingen
 daadwerkelijk op welke pagina getekend worden, welke tekst er staat en welke er
