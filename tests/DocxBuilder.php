@@ -208,14 +208,20 @@ final class DocxBuilder
         return '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
     }
 
-    public static function imageRun(string $relId, int $width = 1905000, int $height = 1905000): string
-    {
+    /** @param string $sourceRectangle een a:srcRect, voor een bijgesneden afbeelding */
+    public static function imageRun(
+        string $relId,
+        int $width = 1905000,
+        int $height = 1905000,
+        string $sourceRectangle = ''
+    ): string {
         return '<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">'
             . '<wp:extent cx="' . $width . '" cy="' . $height . '"/>'
             . '<wp:docPr id="1" name="Afbeelding"/>'
             . '<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">'
             . '<pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="Afbeelding"/><pic:cNvPicPr/></pic:nvPicPr>'
-            . '<pic:blipFill><a:blip r:embed="' . $relId . '"/><a:stretch><a:fillRect/></a:stretch>'
+            . '<pic:blipFill><a:blip r:embed="' . $relId . '"/>' . $sourceRectangle
+            . '<a:stretch><a:fillRect/></a:stretch>'
             . '</pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/>'
             . '<a:ext cx="' . $width . '" cy="' . $height . '"/></a:xfrm>'
             . '<a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>'
