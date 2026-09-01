@@ -25,6 +25,9 @@ use PrintScript\RenderedSection;
  */
 final class MpdfEngine implements EngineInterface
 {
+    /** @var string[] waarschuwingen die pas bij het opmaken blijken */
+    private array $warnings = [];
+
     public function __construct(private ?string $temporaryDirectory = null)
     {
     }
@@ -45,6 +48,7 @@ final class MpdfEngine implements EngineInterface
         // schijf gezet. Als base64 in de HTML zou één foto het document al
         // over de PCRE-limiet van mPDF duwen.
         $paths = $this->writeImages($document->images);
+        $this->warnings = [];
 
         try {
             $withBookmarks = $options->imagesFirstPageOnly && $document->imageIds !== [];
@@ -65,7 +69,7 @@ final class MpdfEngine implements EngineInterface
                 pdf: $result['pdf'],
                 pageCount: $result['pages'],
                 imagesRemoved: $imagesRemoved,
-                warnings: $document->warnings,
+                warnings: array_merge($document->warnings, $this->warnings),
                 engine: $this->name(),
             );
         } finally {
@@ -149,6 +153,7 @@ final class MpdfEngine implements EngineInterface
         $mpdf->useKerning = true;
         $this->startPageNumbering($mpdf, $first?->pageNumberStart);
         $mpdf->WriteHTML($html);
+        $this->reportUnprintableCharacters($mpdf, $html);
 
         $bookmarks = [];
         foreach ($mpdf->BMoutlines as $entry) {
@@ -404,6 +409,97 @@ final class MpdfEngine implements EngineInterface
             '',
             $html
         );
+    }
+
+    /**
+     * Zeggen welke tekens er niet op papier komen.
+     *
+     * De meegeleverde lettertypen dekken het Latijnse, Griekse en Cyrillische
+     * schrift plus de gangbare leestekens en symbolen. Een Chinees teken, een
+     * emoji in een regieaanwijzing: die staan in geen van de lettertypen, en
+     * dan drukt een PDF een leeg vakje af. Zonder dit bericht zou de gebruiker
+     * dat vakje pas op papier zien en niet weten waar het vandaan komt.
+     *
+     * De vraag "kan dit teken?" wordt aan mPDF zelf gesteld, met de tabel
+     * waarmee hij hem ook zou zetten — geen lijstje met schriften dat na de
+     * eerste de beste wijziging niet meer klopt.
+     */
+    private function reportUnprintableCharacters(Mpdf $mpdf, string $html): void
+    {
+        $text = preg_replace('~<style\b[^>]*>.*?</style>~is', ' ', $html) ?? $html;
+        $text = html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+
+        $candidates = [];
+        foreach (preg_split('//u', $text, -1, PREG_SPLIT_NO_EMPTY) ?: [] as $character) {
+            $code = mb_ord($character, 'UTF-8');
+            // Onder U+0300 zit alleen Latijn en leestekens; dat kan alles.
+            if ($code !== false && $code >= 0x0300) {
+                $candidates[$code] = $character;
+            }
+        }
+        if ($candidates === []) {
+            return;
+        }
+
+        foreach ($this->substitutionFonts($mpdf) as $widths) {
+            foreach (array_keys($candidates) as $code) {
+                // Zo leest mPDF zijn eigen breedtetabel: een breedte van nul
+                // betekent dat het teken er niet in zit.
+                if (isset($widths[$code * 2 + 1])
+                    && ((ord($widths[$code * 2]) << 8) + ord($widths[$code * 2 + 1])) > 0) {
+                    unset($candidates[$code]);
+                }
+            }
+            if ($candidates === []) {
+                return;
+            }
+        }
+
+        $shown = array_slice($candidates, 0, 6);
+        $this->warn(sprintf(
+            'Deze tekens staan in geen van de meegeleverde lettertypen en komen '
+            . 'als leeg vakje op papier: %s%s. Chinees, Japans, Koreaans en '
+            . 'emoji vallen buiten wat PrintScript kan zetten.',
+            implode(' ', $shown),
+            count($candidates) > count($shown)
+                ? sprintf(' (en nog %d andere)', count($candidates) - count($shown))
+                : ''
+        ));
+    }
+
+    /**
+     * De breedtetabellen van de lettertypen waar mPDF een teken in kan zoeken:
+     * wat hij al geladen heeft, plus zijn terugvallijst.
+     *
+     * @return iterable<string>
+     */
+    private function substitutionFonts(Mpdf $mpdf): iterable
+    {
+        $families = array_unique(array_merge(
+            array_keys($mpdf->fonts),
+            (array) $mpdf->backupSubsFont
+        ));
+
+        foreach ($families as $family) {
+            if (!isset($mpdf->fonts[$family])) {
+                try {
+                    $mpdf->AddFont($family);
+                } catch (\Throwable) {
+                    continue;   // ontbreekt: dan telt hij gewoon niet mee
+                }
+            }
+            $widths = $mpdf->fonts[$family]['cw'] ?? null;
+            if (is_string($widths) && $widths !== '') {
+                yield $widths;
+            }
+        }
+    }
+
+    private function warn(string $message): void
+    {
+        if (!in_array($message, $this->warnings, true)) {
+            $this->warnings[] = $message;
+        }
     }
 
     /**

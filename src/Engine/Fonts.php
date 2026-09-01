@@ -109,17 +109,76 @@ final class Fonts
         ];
     }
 
+    /**
+     * De lettertypen waarvan het bestand er werkelijk staat.
+     *
+     * mPDF wordt geleverd met een lijst van ruim honderd lettertypen, maar met
+     * de bestanden van een handvol daarvan. Wij dunnen dat nog verder uit: het
+     * uitrolpakket moet op een gewone hosting passen, dus alles wat we niet
+     * gebruiken gaat eruit.
+     *
+     * Die twee lijsten moeten wel bij elkaar blijven. Doen ze dat niet, dan
+     * gaat het pas mis op het moment dat iemand een letter gebruikt die
+     * nergens in staat — een Chinees teken, een emoji in een script — en dan
+     * stopt de hele conversie met een foutmelding over een bestand waar de
+     * gebruiker part noch deel aan heeft. Dus houden we hier alleen over wat
+     * er echt is.
+     *
+     * @param string[] $directories
+     * @param array<string, array<string, mixed>> $fontdata
+     * @return array<string, array<string, mixed>>
+     */
+    private static function available(array $fontdata, array $directories): array
+    {
+        $exists = static function (string $file) use ($directories): bool {
+            foreach ($directories as $directory) {
+                if (is_file(rtrim($directory, '/\\') . '/' . $file)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        $available = [];
+        foreach ($fontdata as $family => $styles) {
+            if (!isset($styles['R']) || !is_string($styles['R']) || !$exists($styles['R'])) {
+                continue;   // zonder rechte variant valt er niets te zetten
+            }
+            foreach (['B', 'I', 'BI'] as $style) {
+                if (isset($styles[$style]) && is_string($styles[$style])
+                    && !$exists($styles[$style])) {
+                    unset($styles[$style], $styles['TTCfontID'][$style]);
+                }
+            }
+            $available[$family] = $styles;
+        }
+        return $available;
+    }
+
     /** De instellingen die mPDF nodig heeft om dit alles te gebruiken. */
     public static function configuration(): array
     {
         $defaults = (new \Mpdf\Config\FontVariables())->getDefaults();
+        $directories = array_merge(
+            (new \Mpdf\Config\ConfigVariables())->getDefaults()['fontDir'],
+            [self::directory()]
+        );
+        $fontdata = self::available($defaults['fontdata'] + self::data(), $directories);
 
         return [
-            'fontDir' => array_merge(
-                (new \Mpdf\Config\ConfigVariables())->getDefaults()['fontDir'],
-                [self::directory()]
-            ),
-            'fontdata' => $defaults['fontdata'] + self::data(),
+            'fontDir' => $directories,
+            'fontdata' => $fontdata,
+            // De lettertypen waar mPDF op terugvalt voor een teken dat in het
+            // gekozen lettertype niet bestaat. Standaard staat sun-exta hier
+            // ook in; dat bestand leveren we niet mee, en dan valt de conversie
+            // om over een Chinees teken of een emoji.
+            'backupSubsFont' => array_values(array_filter(
+                (array) ($defaults['backupSubsFont'] ?? []),
+                static fn(string $name): bool => isset($fontdata[$name])
+            )),
+            'backupSIPFont' => isset($fontdata[$defaults['backupSIPFont'] ?? ''])
+                ? $defaults['backupSIPFont']
+                : '',
             'default_font' => 'liberationsans',
             'sans_fonts' => array_merge(
                 ['liberationsans'],
