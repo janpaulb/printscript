@@ -25,6 +25,76 @@ final class FontsTest extends TestCase
             'zonder deze bestanden valt mPDF stil terug op een ander lettertype');
     }
 
+    /**
+     * mPDF kent ruim honderd lettertypen en heeft de bestanden van een
+     * handvol; wij dunnen dat nog verder uit om het uitrolpakket klein te
+     * houden. Wijst de instelling naar een bestand dat er niet is, dan gaat
+     * het pas stuk als iemand een teken gebruikt dat nergens in staat — en
+     * dan valt de hele conversie om.
+     */
+    public function testNoConfiguredFontPointsAtAMissingFile(): void
+    {
+        $configuration = Fonts::configuration();
+        $directories = $configuration['fontDir'];
+
+        $found = static function (string $file) use ($directories): bool {
+            foreach ($directories as $directory) {
+                if (is_file(rtrim($directory, '/\\') . '/' . $file)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        foreach ($configuration['fontdata'] as $family => $styles) {
+            foreach (['R', 'B', 'I', 'BI'] as $style) {
+                if (isset($styles[$style]) && is_string($styles[$style])) {
+                    $this->assertTrue($found($styles[$style]),
+                        "$family verwijst naar $styles[$style], en dat bestand ontbreekt");
+                }
+            }
+        }
+
+        foreach ($configuration['backupSubsFont'] as $family) {
+            $this->assertArrayHasKey($family, $configuration['fontdata'],
+                'een terugvallettertype dat we niet meeleveren laat de conversie omvallen');
+        }
+        $this->assertNotSame('', $configuration['default_font']);
+    }
+
+    /**
+     * Een enkel Chinees teken of een emoji in een regieaanwijzing liet de hele
+     * conversie omvallen: mPDF zocht dan het lettertype Sun-ExtA, en dat
+     * leveren we niet mee.
+     */
+    public function testACharacterNoFontCoversDoesNotBreakTheConversion(): void
+    {
+        $builder = new DocxBuilder();
+        $body = DocxBuilder::paragraph('Regie: 会议记录 en 🎬 en dan verder')
+            . DocxBuilder::SECTION;
+
+        $result = (new Pipeline())->convertDocx($builder->build($body));
+
+        $this->assertSame(1, $result->pageCount);
+        $this->assertStringContainsString('Regie:', (new PdfInspector($result->pdf))->text());
+        // En het blijft niet stil: er staat bij dat die tekens leeg blijven.
+        $this->assertNotEmpty(array_filter(
+            $result->warnings,
+            static fn(string $warning): bool => str_contains($warning, 'leeg vakje')
+        ), 'de gebruiker hoort te weten waarom er een leeg vakje op papier staat');
+    }
+
+    /** Grieks, Cyrillisch en gewone symbolen kunnen wél — daar geen ruis over. */
+    public function testCharactersThatDoWorkAreNotWarnedAbout(): void
+    {
+        $builder = new DocxBuilder();
+        $body = DocxBuilder::paragraph('αβγ Привет ∑ — “aanhaling”') . DocxBuilder::SECTION;
+
+        $result = (new Pipeline())->convertDocx($builder->build($body));
+
+        $this->assertSame([], $result->warnings);
+    }
+
     /** @dataProvider families */
     public function testWordFontsAreReplacedByTheirMetricEqual(string $family, string $expected): void
     {

@@ -192,6 +192,14 @@ Andere namen (Calibri, Verdana, Georgia, Cambria) vallen terug op het
 Liberation-lettertype dat er qua karakter het dichtst bij komt; daar zijn de
 breedtes een benadering.
 
+Voor een teken dat in geen van die lettertypen staat, valt mPDF terug op zijn
+eigen reservelettertypen. Die lijst wordt eerst nagelopen: alleen wat er
+werkelijk staat blijft erin. Anders gaat het pas mis op het moment dat iemand
+een Chinees teken of een emoji gebruikt — en dan stopt de hele conversie met
+een foutmelding over een lettertypebestand waar de gebruiker part noch deel aan
+heeft. Kan een teken écht nergens uit, dan zegt de waarschuwing dát, in plaats
+van dat er stilletjes een leeg vakje op papier komt.
+
 ### Bijgesneden afbeeldingen worden echt bijgesneden
 
 Wie in Google Docs of Word een afbeelding bijsnijdt, gooit niets weg. Het hele
@@ -220,7 +228,7 @@ Het testgereedschap staat bewust in een eigen map (`vendor-dev/`), los van de
 `vendor/` die mee de server op gaat. Zo bevat die laatste precies wat er hoort
 en niets meer — 29 MB in plaats van ruim 2 GB.
 
-79 tests, ongeveer een seconde. Ze bouwen `.docx`-pakketten met de hand
+82 tests, ongeveer twee seconden. Ze bouwen `.docx`-pakketten met de hand
 (`tests/DocxBuilder.php`) en controleren de **uitkomst in de PDF**
 (`tests/PdfInspector.php`): welke pagina's er zijn, welke afbeeldingen
 daadwerkelijk op welke pagina getekend worden, welke tekst er staat en welke er
@@ -247,6 +255,7 @@ bewijzen de tests wat er op papier komt, niet welke functie is aangeroepen.
 | Titelpagina-instelling | wordt op de eerste sectie toegepast |
 | Grafieken en SmartArt | worden overgeslagen (met een waarschuwing) |
 | Lettertypen | Liberation (exact zo breed als Arial, Times New Roman en Courier New); andere lettertypen vallen daarop terug |
+| Schriften | Latijn, Grieks, Cyrillisch en de gangbare symbolen. Chinees, Japans, Koreaans en emoji komen als leeg vakje op papier, met een waarschuwing erbij; Arabisch en Hebreeuws blijven ook leeg, maar dat merkt PrintScript zelf niet op |
 
 Waarschuwingen komen in de webinterface onder het resultaat te staan en in de
 `X-PrintScript-Summary`-header, zodat je weet wat er is overgeslagen in plaats
