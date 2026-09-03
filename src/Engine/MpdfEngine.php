@@ -548,6 +548,13 @@ final class MpdfEngine implements EngineInterface
      */
     private function raiseBacktrackLimit(string $html): void
     {
+        // Op een gedeelde hosting staan ini_get en ini_set geregeld in
+        // disable_functions. Ze zomaar aanroepen is dan een fatale fout, en
+        // dan valt de conversie om over iets heel anders dan waar het om ging.
+        if (!function_exists('ini_get') || !function_exists('ini_set')) {
+            return;
+        }
+
         $needed = strlen($html) + 1024 * 1024;
         $current = (int) ini_get('pcre.backtrack_limit');
         if ($current >= $needed) {

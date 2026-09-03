@@ -179,6 +179,23 @@
     show('error');
   }
 
+  /* Wat de server terugstuurde als het geen JSON was: meestal een PHP-fout in
+     platte tekst of in HTML. De tags eraf, en dan het begin ervan — daar staat
+     het echte probleem in. */
+  function serverMessage(body, status) {
+    var text = String(body || '')
+      .replace(/<br\s*\/?>/gi, ' ')
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (text.length > 300) { text = text.slice(0, 300) + '…'; }
+    return text
+      ? 'De server gaf een fout (HTTP ' + status + '): ' + text
+      : 'Onverwachte fout (HTTP ' + status + '). De server stuurde geen uitleg mee — ' +
+        'meestal betekent dat te weinig geheugen of te weinig tijd voor een document ' +
+        'van deze omvang.';
+  }
+
   function decodeSummary(response) {
     var raw = response.headers.get('X-PrintScript-Summary');
     if (!raw) { return null; }
@@ -230,9 +247,15 @@
     request.then(function (response) {
       var type = response.headers.get('Content-Type') || '';
       if (!response.ok || type.indexOf('application/pdf') === -1) {
-        return response.json()
-          .catch(function () { return { error: 'Onverwachte fout (HTTP ' + response.status + ').' }; })
-          .then(function (payload) { throw new Error(payload.error || 'Conversie mislukt.'); });
+        // Niet meteen naar JSON grijpen: gaat de server halverwege onderuit,
+        // dan komt er een brok tekst of HTML terug, en daar staat vaak precies
+        // in wat er aan de hand is. Dat is meer waard dan "onverwachte fout".
+        return response.text().then(function (body) {
+          var payload = null;
+          try { payload = JSON.parse(body); } catch (error) { payload = null; }
+          if (payload && payload.error) { throw new Error(payload.error); }
+          throw new Error(serverMessage(body, response.status));
+        });
       }
       var summary = decodeSummary(response);
       return response.blob().then(function (blob) {
