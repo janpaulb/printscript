@@ -200,6 +200,20 @@ een foutmelding over een lettertypebestand waar de gebruiker part noch deel aan
 heeft. Kan een teken écht nergens uit, dan zegt de waarschuwing dát, in plaats
 van dat er stilletjes een leeg vakje op papier komt.
 
+### Een fatale fout mag geen lege 500 zijn
+
+Raakt PHP door zijn geheugen of zijn tijd heen, dan is dat geen fout die je
+kunt opvangen: het script houdt ter plekke op en de browser krijgt een leeg
+antwoord. PrintScript vraagt daarom eerst om ruimte (300 seconden, 512 MB —
+best effort, en nooit naar beneden) en legt een stukje geheugen opzij voor het
+geval dat toch niet genoeg is. Gaat het dan alsnog mis, dan komt er een
+leesbaar bericht terug met de instelling die je hostingpartij moet verhogen,
+in plaats van "onverwachte fout".
+
+Op een gedeelde hosting staan `ini_set` en `set_time_limit` geregeld in
+`disable_functions`. Ze worden daarom nergens zomaar aangeroepen: dat zou
+namelijk zélf de fatale fout zijn.
+
 ### Bijgesneden afbeeldingen worden echt bijgesneden
 
 Wie in Google Docs of Word een afbeelding bijsnijdt, gooit niets weg. Het hele
@@ -228,7 +242,7 @@ Het testgereedschap staat bewust in een eigen map (`vendor-dev/`), los van de
 `vendor/` die mee de server op gaat. Zo bevat die laatste precies wat er hoort
 en niets meer — 29 MB in plaats van ruim 2 GB.
 
-82 tests, ongeveer twee seconden. Ze bouwen `.docx`-pakketten met de hand
+84 tests, ongeveer een seconde. Ze bouwen `.docx`-pakketten met de hand
 (`tests/DocxBuilder.php`) en controleren de **uitkomst in de PDF**
 (`tests/PdfInspector.php`): welke pagina's er zijn, welke afbeeldingen
 daadwerkelijk op welke pagina getekend worden, welke tekst er staat en welke er
@@ -246,6 +260,7 @@ bewijzen de tests wat er op papier komt, niet welke functie is aangeroepen.
 | | |
 |---|---|
 | Maximale bestandsgrootte | 50 MB (en wat je hosting toestaat) |
+| Tijd en geheugen | een script van veertig pagina's met evenveel schermafdrukken is echt werk. PrintScript vraagt de server om 300 seconden en 512 MB; mag dat niet, dan zegt de foutmelding welke instelling omhoog moet |
 | Invoer | `.docx` en Google Docs |
 | Uitvoer | PDF |
 | Zwevende afbeeldingen | staan op hun eigen plek en buiten de tekststroom, maar de tekst loopt er niet omheen |

@@ -40,11 +40,111 @@ require $autoload;
 const PRINTSCRIPT_VERSION = '3.0.0';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    giveTheConversionRoom();
+    reportFatalErrorsAsJson();
     handleConversion();
     exit;
 }
 
 showPage();
+
+
+// ── Ruimte en vangnet ────────────────────────────────────────────────────────
+
+/**
+ * Een script van veertig pagina's met veertig schermafdrukken is gewoon werk.
+ *
+ * De standaardinstellingen van een gedeelde hosting zijn op webpagina's
+ * gemaakt, niet op het opmaken van een boekwerk: dertig seconden en honderd-
+ * achtentwintig megabyte. Beide mogen vaak wél omhoog vanuit het script zelf.
+ * Lukt het niet, dan stond het al vast en verandert deze functie niets — ze
+ * probeert het alleen, en nooit naar beneden.
+ */
+function giveTheConversionRoom(): void
+{
+    // Op een gedeelde hosting staan deze twee geregeld in disable_functions.
+    // Ze zomaar aanroepen is dan een fatale fout — en juist deze functie mag
+    // niet degene zijn die de boel opblaast.
+    if (function_exists('set_time_limit')) {
+        @set_time_limit(300);
+    }
+    if (!function_exists('ini_set') || !function_exists('ini_get')) {
+        return;
+    }
+
+    $limit = trim((string) ini_get('memory_limit'));
+    if ($limit !== '' && $limit !== '-1' && bytesOf($limit) < 512 * 1024 * 1024) {
+        @ini_set('memory_limit', '512M');
+    }
+}
+
+/** "128M" en "1G" naar bytes; een kale waarde is al bytes. */
+function bytesOf(string $value): int
+{
+    $number = (int) $value;
+    return match (strtolower(substr($value, -1))) {
+        'g' => $number * 1024 * 1024 * 1024,
+        'm' => $number * 1024 * 1024,
+        'k' => $number * 1024,
+        default => $number,
+    };
+}
+
+/**
+ * Een fatale fout mag geen lege 500 opleveren.
+ *
+ * Raakt PHP door zijn geheugen of zijn tijd heen, dan is dat geen exceptie
+ * die je kunt opvangen: het script houdt ter plekke op. De browser krijgt dan
+ * een antwoord zonder inhoud en de pagina kan niet beter dan "Onverwachte
+ * fout (HTTP 500)" melden — precies de foutmelding waar niemand iets aan
+ * heeft. Deze afsluiter maakt er alsnog een leesbaar bericht van, mét wat de
+ * hostingpartij dan moet verhogen.
+ */
+function reportFatalErrorsAsJson(): void
+{
+    // Raakt PHP door zijn geheugen heen, dan is er ook geen geheugen meer om
+    // dat te vertellen: de afsluiter komt zelf niet verder dan een leeg
+    // antwoord. Dus leggen we nu alvast een stukje opzij en geven dat als
+    // eerste weer vrij.
+    $reserve = str_repeat(' ', 256 * 1024);
+
+    register_shutdown_function(static function () use (&$reserve): void {
+        $reserve = null;
+        $error = error_get_last();
+        if ($error === null
+            || !in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+            return;
+        }
+        if (headers_sent()) {
+            return;   // de PDF is al onderweg; er valt niets meer te melden
+        }
+
+        $message = $error['message'];
+        if (str_contains($message, 'memory size')) {
+            $message = sprintf(
+                'De server had te weinig geheugen voor dit document (limiet: %s). '
+                . 'Vraag je hostingpartij om memory_limit op 512M te zetten.',
+                function_exists('ini_get') ? (ini_get('memory_limit') ?: 'onbekend') : 'onbekend'
+            );
+        } elseif (str_contains($message, 'Maximum execution time')) {
+            $message = sprintf(
+                'De server stopte na %s seconden, voordat het document af was. '
+                . 'Vraag je hostingpartij om max_execution_time te verhogen.',
+                function_exists('ini_get')
+                    ? (ini_get('max_execution_time') ?: 'onbekend') : 'onbekend'
+            );
+        } else {
+            $message = 'Conversie mislukt: ' . $message;
+        }
+
+        while (ob_get_level() > 0) {
+            ob_end_clean();
+        }
+        http_response_code(500);
+        header('Content-Type: application/json; charset=utf-8');
+        echo (string) json_encode(['error' => $message], JSON_UNESCAPED_UNICODE);
+    });
+}
 
 
 // ── Omzetten ─────────────────────────────────────────────────────────────────

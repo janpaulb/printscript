@@ -42,9 +42,9 @@ final class ImageCropTest extends TestCase
     {
         $source = self::fourQuarters();
 
-        $left = imagecreatefromstring((string) ImageCrop::apply($source, [0.0, 0.0, 0.5, 0.0]));
-        $right = imagecreatefromstring((string) ImageCrop::apply($source, [0.5, 0.0, 0.0, 0.0]));
-        $bottom = imagecreatefromstring((string) ImageCrop::apply($source, [0.0, 0.5, 0.0, 0.0]));
+        $left = self::crop($source, [0.0, 0.0, 0.5, 0.0]);
+        $right = self::crop($source, [0.5, 0.0, 0.0, 0.0]);
+        $bottom = self::crop($source, [0.0, 0.5, 0.0, 0.0]);
 
         // Het uitgesneden stuk heeft zijn eigen afmetingen; niets wordt gerekt.
         $this->assertSame([100, 100], [imagesx($left), imagesy($left)]);
@@ -60,12 +60,56 @@ final class ImageCropTest extends TestCase
     /** Doorzichtigheid overleeft het bijsnijden — anders krijgt een logo een kader. */
     public function testCroppingKeepsTransparency(): void
     {
-        $cropped = imagecreatefromstring(
-            (string) ImageCrop::apply(self::fourQuarters(), [0.0, 0.5, 0.0, 0.0])
-        );
+        $cropped = self::crop(self::fourQuarters(), [0.0, 0.5, 0.0, 0.0]);
 
         $alpha = (imagecolorat($cropped, 50, 10) >> 24) & 0x7F;
         $this->assertSame(63, $alpha, 'de half doorzichtige band blijft half doorzichtig');
+    }
+
+    /**
+     * Een afbeelding zónder doorzichtigheid krijgt er ook geen.
+     *
+     * Dit is geen zuinigheid om de zuinigheid. Een PDF-motor moet een
+     * afbeelding mét alfakanaal uit elkaar trekken in een beeld en een masker,
+     * en dat kost ruim een seconde per schermafdruk van vier miljoen
+     * beeldpunten. Bij een repetitiescript met veertig stills is dat het
+     * verschil tussen een PDF en een server die er na dertig seconden mee
+     * ophoudt.
+     */
+    public function testAnOpaqueImageDoesNotGetAnAlphaChannel(): void
+    {
+        $opaque = imagecreatetruecolor(200, 100);
+        imagefilledrectangle($opaque, 0, 0, 199, 99, imagecolorallocate($opaque, 30, 90, 160));
+        ob_start();
+        imagepng($opaque);
+        imagedestroy($opaque);
+        $png = (string) ob_get_clean();
+
+        [$bytes] = ImageCrop::apply($png, [0.0, 0.0, 0.5, 0.0]) ?? ['', ''];
+
+        // Kleurtype 6 is RGBA, 2 is vol kleur zonder alfa; het staat in de IHDR.
+        $this->assertSame(2, ord($bytes[25]),
+            'zonder doorzichtigheid in de bron hoort er geen alfakanaal uit te komen');
+        // En de doorzichtige variant houdt hem wél.
+        [$transparent] = ImageCrop::apply(self::fourQuarters(), [0.0, 0.5, 0.0, 0.0]) ?? ['', ''];
+        $this->assertSame(6, ord($transparent[25]));
+    }
+
+    /** Een JPEG blijft een JPEG: als PNG opslaan kost tien keer zoveel tijd. */
+    public function testAJpegStaysAJpeg(): void
+    {
+        $photo = imagecreatetruecolor(200, 100);
+        imagefilledrectangle($photo, 0, 0, 199, 99, imagecolorallocate($photo, 200, 120, 60));
+        ob_start();
+        imagejpeg($photo, null, 90);
+        imagedestroy($photo);
+        $jpeg = (string) ob_get_clean();
+
+        [$bytes, $mime] = ImageCrop::apply($jpeg, [0.0, 0.0, 0.5, 0.0], 'image/jpeg')
+            ?? ['', ''];
+
+        $this->assertSame('image/jpeg', $mime);
+        $this->assertStringStartsWith("\xFF\xD8", $bytes, 'en het is ook echt een JPEG');
     }
 
     /**
@@ -127,6 +171,15 @@ final class ImageCropTest extends TestCase
             'de afbeelding zit als 100 bij 100 in de PDF, niet als 200 bij 100 platgedrukt'
         );
         $this->assertDoesNotMatchRegularExpression('~/Width 200\s*/Height 100~', $result->pdf);
+    }
+
+    /** @param array{0: float, 1: float, 2: float, 3: float} $rectangle */
+    private static function crop(string $png, array $rectangle): \GdImage
+    {
+        [$bytes, $mime] = ImageCrop::apply($png, $rectangle) ?? ['', ''];
+        \PHPUnit\Framework\Assert::assertNotSame('', $bytes, 'het bijsnijden lukte niet');
+        \PHPUnit\Framework\Assert::assertSame('image/png', $mime);
+        return imagecreatefromstring($bytes);
     }
 
     /** @return array{int, int, int} */

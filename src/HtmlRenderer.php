@@ -1179,10 +1179,9 @@ final class HtmlRenderer
         // zien is. Wie dat niet uitvoert, drukt het hele plaatje in het vakje
         // dat voor het uitgesneden stuk bedoeld was.
         if ($crop !== null) {
-            $cropped = ImageCrop::apply($blob, $crop);
+            $cropped = ImageCrop::apply($blob, $crop, $mime);
             if ($cropped !== null) {
-                $blob = $cropped;
-                $mime = 'image/png';
+                [$blob, $mime] = $cropped;
             } else {
                 $this->warnOnce(ImageCrop::isAvailable()
                     ? 'Een bijgesneden afbeelding kon niet worden bijgesneden en '
