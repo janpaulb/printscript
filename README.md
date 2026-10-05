@@ -49,6 +49,7 @@ php -S localhost:8000     # draait meteen; vendor/ zit er al in
 | Verplicht | `zip`, `dom`, `mbstring` |
 | Voor afbeeldingen | `gd` (ook voor bijgesneden afbeeldingen) |
 | Voor Google Docs-links | `curl` |
+| Voor privédocumenten | `openssl` (zit standaard in PHP) |
 
 Dat is de standaarduitrusting van vrijwel elke hosting. Zonder `curl` werkt het
 uploaden van een `.docx` nog gewoon.
@@ -81,6 +82,57 @@ https://drive.google.com/open?id=<ID>
 
 Voor privédocumenten heb je een OAuth-token nodig: zet die in de omgeving als
 `GOOGLE_ACCESS_TOKEN`, of stuur hem mee als `access_token` in de API-aanroep.
+
+### Privédocumenten: het serviceaccount
+
+Standaard moet een document op **Iedereen met de link → Kijker** staan. Dat is
+onhandig en het is iets om weer terug te zetten. Met een serviceaccount hoeft
+dat niet meer: je deelt een script één keer met één adres en klaar.
+
+**1. Maak het serviceaccount.** In de Google Cloud Console: *IAM & Admin →
+Service Accounts → Create*, en zet daarna onder *Enabled APIs* de **Google
+Drive API** aan. Maak een sleutel (*Keys → Add key → JSON*) en download het
+bestand.
+
+**2. Zet de sleutel buiten de webmap.** Op DirectAdmin-hosting ziet dat er zo
+uit:
+
+```
+/domains/jouwsite.nl/
+├── printscript-keys/
+│   └── google.json      ← hier, chmod 600
+├── public_html/         ← printscript staat hier
+└── private_html/        ⚠ géén besloten map
+```
+
+> **Let op `private_html`.** Die naam liegt. Van oudsher is dat de webmap voor
+> https, en tegenwoordig meestal een snelkoppeling naar `public_html` — wat je
+> erin zet staat gewoon online. Printscript volgt snelkoppelingen en **weigert**
+> een sleutel die in de webmap uitkomt, met uitleg.
+
+Printscript zoekt het bestand in deze volgorde:
+
+1. de omgevingsvariabele `PRINTSCRIPT_GOOGLE_KEYFILE` (of `SetEnv` in
+   `.htaccess` — daar staat alleen het *pad* in, niet de sleutel)
+2. `<naast public_html>/printscript-keys/google.json`
+3. `<naast public_html>/private/printscript-google.json`
+
+Controleer het met:
+
+```bash
+php bin/printscript --check
+```
+
+**3. Deel het script.** Open het document, *Delen*, plak het adres uit stap 2
+(`...@....iam.gserviceaccount.com`) en geef **Kijker**. De pagina toont dat
+adres zodra de sleutel gevonden is, klaar om te kopiëren.
+
+Vanaf dat moment hoeft een script nooit meer openbaar — en laat printscript de
+rode "weer op privé zetten"-herinnering weg, want er valt niets terug te
+zetten.
+
+Geen sleutel gevonden? Dan werkt alles zoals voorheen: openbare link of een
+geüpload `.docx`.
 
 ### Opties
 
@@ -130,6 +182,10 @@ Geüploade .docx ─────────────────────
 | Bestand | Verantwoordelijkheid |
 |---|---|
 | `src/GoogleDocs.php` | link → document-id → `.docx` (+ de titel uit de response-header) |
+| `src/Google/Keyfile.php` | de sleutel opzoeken, en weigeren als hij in de webmap staat |
+| `src/Google/ServiceAccount.php` | JWT ondertekenen → toegangstoken bij Google |
+| `src/Google/Retry.php` | opnieuw proberen, maar alleen bij tijdelijke fouten |
+| `bin/printscript` | dezelfde pijplijn vanaf de commandline |
 | `src/Package.php` | het `.docx`-zip als onderdelen en relaties, volledig in het geheugen |
 | `src/Clean.php` | opmerkingen en markeringen uit álle onderdelen, ook uit `styles.xml` |
 | `src/Styles.php`, `src/Numbering.php` | `styles.xml` en `numbering.xml` platgeslagen |
@@ -200,6 +256,24 @@ een foutmelding over een lettertypebestand waar de gebruiker part noch deel aan
 heeft. Kan een teken écht nergens uit, dan zegt de waarschuwing dát, in plaats
 van dat er stilletjes een leeg vakje op papier komt.
 
+### Ingelogd exporteren gaat via Drive, niet via docs.google.com
+
+Dit kost een half uur als je het niet weet. Het adres
+`docs.google.com/document/d/<id>/export` werkt prima voor een openbaar
+document, maar is niet bedoeld voor API-tokens: een serviceaccount krijgt er
+een inlogpagina terug. De officiële weg voor een ingelogde export is Drive's
+`files/<id>/export`, en dus is de scope `drive.readonly` — niet
+`documents.readonly`, want dat is voor het lezen van de inhoud als JSON.
+
+Dat laatste is ook precies waarom printscript de Docs API *niet* gebruikt om
+het script te lezen. Die geeft tekst in stukjes; printscript heeft de **opmaak**
+nodig — de arceringen, de afbeeldingen, de sectie-eigenschappen, de
+paginanummering. Dat zit allemaal alleen in de `.docx`.
+
+Het ondertekenen gebeurt met de hand (`openssl_sign`, veertig regels). De
+Google-clientbibliotheek is tientallen megabytes, en `vendor/` gaat bij dit
+project mee de hosting op.
+
 ### Een fatale fout mag geen lege 500 zijn
 
 Raakt PHP door zijn geheugen of zijn tijd heen, dan is dat geen fout die je
@@ -242,7 +316,7 @@ Het testgereedschap staat bewust in een eigen map (`vendor-dev/`), los van de
 `vendor/` die mee de server op gaat. Zo bevat die laatste precies wat er hoort
 en niets meer — 29 MB in plaats van ruim 2 GB.
 
-84 tests, ongeveer een seconde. Ze bouwen `.docx`-pakketten met de hand
+99 tests, een paar seconden. Ze bouwen `.docx`-pakketten met de hand
 (`tests/DocxBuilder.php`) en controleren de **uitkomst in de PDF**
 (`tests/PdfInspector.php`): welke pagina's er zijn, welke afbeeldingen
 daadwerkelijk op welke pagina getekend worden, welke tekst er staat en welke er
@@ -270,6 +344,7 @@ bewijzen de tests wat er op papier komt, niet welke functie is aangeroepen.
 | Titelpagina-instelling | wordt op de eerste sectie toegepast |
 | Grafieken en SmartArt | worden overgeslagen (met een waarschuwing) |
 | Lettertypen | Liberation (exact zo breed als Arial, Times New Roman en Courier New); andere lettertypen vallen daarop terug |
+| Privédocumenten | met een serviceaccount; zonder sleutel moet een document openbaar zijn |
 | Schriften | Latijn, Grieks, Cyrillisch en de gangbare symbolen. Chinees, Japans, Koreaans en emoji komen als leeg vakje op papier, met een waarschuwing erbij; Arabisch en Hebreeuws blijven ook leeg, maar dat merkt PrintScript zelf niet op |
 
 Waarschuwingen komen in de webinterface onder het resultaat te staan en in de

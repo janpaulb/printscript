@@ -13,3 +13,7 @@ build/
 *.pdf
 *.docx
 .env
+
+# De sleutel van het serviceaccount hoort hier nooit in.
+keys/
+*serviceaccount*.json

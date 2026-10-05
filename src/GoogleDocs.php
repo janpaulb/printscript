@@ -4,6 +4,14 @@ declare(strict_types=1);
 
 namespace PrintScript;
 
+use PrintScript\Google\CurlTransport;
+use PrintScript\Google\GoogleAuthException;
+use PrintScript\Google\Keyfile;
+use PrintScript\Google\Response;
+use PrintScript\Google\Retry;
+use PrintScript\Google\ServiceAccount;
+use PrintScript\Google\Transport;
+
 /**
  * De downloader voor Google Docs.
  *
@@ -11,8 +19,15 @@ namespace PrintScript;
  * daarna zelf opgebouwd. Een geplakte link kan de server dus nooit iets anders
  * laten ophalen.
  *
- * Documenten die gedeeld zijn als "iedereen met de link kan bekijken" werken
- * zonder inloggegevens. Voor een privédocument is een OAuth-token nodig.
+ * Er zijn twee wegen naar binnen. Zonder sleutel pakken we het openbare
+ * export-adres: dat werkt voor documenten die op "iedereen met de link" staan.
+ * Is er een serviceaccount ingesteld, dan gaat het via Drive, en dan hoeft een
+ * document helemaal niet openbaar te zijn — delen met het adres van het
+ * serviceaccount is genoeg.
+ *
+ * Let op het verschil in adres: docs.google.com/.../export is niet bedoeld
+ * voor API-tokens en stuurt een serviceaccount een inlogpagina. De officiële
+ * weg voor een ingelogde export is Drive's files/export.
  */
 class GoogleDocs
 {
@@ -21,12 +36,62 @@ class GoogleDocs
     public const READ_TIMEOUT = 120;
 
     private const EXPORT_URL = 'https://docs.google.com/document/d/%s/export?format=docx';
+
+    private const DRIVE_EXPORT_URL = 'https://www.googleapis.com/drive/v3/files/%s/export'
+        . '?mimeType=application%%2Fvnd.openxmlformats-officedocument.wordprocessingml.document'
+        . '&supportsAllDrives=true';
+
+    private const DOCX_MIME = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+
     private const USER_AGENT = 'PrintScript/3.0 (+https://github.com/janpaulb/printscript)';
 
     private const ID = '[a-zA-Z0-9_-]{12,}';
 
     private const HELP = "Plak de deel-link van je document, bijvoorbeeld:\n"
         . 'https://docs.google.com/document/d/<document-id>/edit';
+
+    private readonly Transport $transport;
+    private readonly Retry $retry;
+
+    public function __construct(
+        private readonly ?ServiceAccount $account = null,
+        ?Transport $transport = null,
+        ?Retry $retry = null,
+    ) {
+        $this->transport = $transport
+            ?? new CurlTransport(self::MAX_DOWNLOAD_BYTES, self::READ_TIMEOUT);
+        $this->retry = $retry ?? new Retry();
+    }
+
+    /**
+     * Zoekt zelf een sleutel op; vindt hij er geen, dan werkt alles als voorheen.
+     *
+     * Een kapotte of verkeerd geplaatste sleutel mag de openbare route niet
+     * meeslepen: die melding komt als waarschuwing terug, niet als fout.
+     */
+    public static function configured(?string &$warning = null): self
+    {
+        $path = Keyfile::locate();
+        if ($path === null) {
+            return new self();
+        }
+        try {
+            $account = ServiceAccount::fromKeyfile($path);
+        } catch (GoogleAuthException $error) {
+            $warning = $error->getMessage();
+            return new self();
+        }
+        if (Keyfile::looseReadRights($path)) {
+            $warning = "Het sleutelbestand $path is voor iedereen leesbaar. "
+                . 'Zet het op chmod 600.';
+        }
+        return new self($account);
+    }
+
+    public function signedInAs(): ?string
+    {
+        return $this->account?->clientEmail();
+    }
 
     /** Haalt het document-id uit elke vorm die Google gebruikt. */
     public static function extractId(string $url): string
@@ -77,95 +142,85 @@ class GoogleDocs
         $id = self::extractId($url);
         $token = $accessToken ?? (getenv('GOOGLE_ACCESS_TOKEN') ?: null);
 
-        [$body, $status, $headers] = $this->fetch(sprintf(self::EXPORT_URL, $id), $token);
+        // Drie manieren, op volgorde van hoe specifiek ze zijn: een token dat
+        // is meegegeven, ons eigen serviceaccount, of gewoon openbaar.
+        if ($token === null && $this->account !== null) {
+            $token = $this->account->accessToken();
+        }
+        $signedIn = $token !== null;
 
-        $this->guard($status, $headers, $token !== null);
+        $response = $this->retry->run(fn(): Response => $this->transport->send(
+            sprintf($signedIn ? self::DRIVE_EXPORT_URL : self::EXPORT_URL, $id),
+            array_filter([
+                'User-Agent' => self::USER_AGENT,
+                'Authorization' => $signedIn ? "Bearer $token" : null,
+            ]),
+        ));
 
-        if (strlen($body) === 0) {
+        if ($response->networkError !== null) {
+            throw new GoogleDocsException(
+                'Kan Google Docs niet bereiken: ' . $response->networkError
+            );
+        }
+
+        $this->guard($response, $signedIn);
+
+        if ($response->body === '') {
             throw new GoogleDocsException('Google stuurde een leeg document terug.');
         }
-        if (!str_starts_with($body, 'PK')) {
-            throw new DocumentAccessException(
-                'Google gaf geen document terug. Zet het document op "Iedereen met de '
-                . 'link kan bekijken", of gebruik een account met toegang.'
-            );
+        if (!str_starts_with($response->body, 'PK')) {
+            throw new DocumentAccessException($signedIn
+                ? 'Google gaf geen document terug. Is dit wel een Google Document '
+                    . '(en geen PDF of Word-bestand in Drive)?'
+                : 'Google gaf geen document terug. Zet het document op "Iedereen met de '
+                    . 'link kan bekijken", of deel het met het serviceaccount.');
         }
 
-        return new DownloadedDocument($body, $id, self::titleFrom($headers));
+        return new DownloadedDocument(
+            $response->body,
+            $id,
+            self::titleFrom($response->headers) ?? ($signedIn ? $this->title($id, $token) : null)
+        );
     }
 
-    /** @return array{0: string, 1: int, 2: array<string, string>} */
-    protected function fetch(string $url, ?string $token): array
+    /**
+     * De naam van het document.
+     *
+     * De openbare export zet die in de Content-Disposition, maar Drive's
+     * export doet dat niet. Dan vragen we hem apart op — anders heet de PDF
+     * naar het document-id, en dat leest niemand.
+     */
+    public function title(string $id, ?string $token = null): ?string
     {
-        if (!function_exists('curl_init')) {
-            throw new GoogleDocsException(
-                'De curl-uitbreiding van PHP ontbreekt, dus documenten kunnen niet bij '
-                . 'Google worden opgehaald. Upload het .docx-bestand in plaats daarvan.'
-            );
+        $token ??= $this->account?->accessToken();
+        if ($token === null) {
+            return null;
         }
 
-        $headers = [];
-        $handle = curl_init($url);
-        curl_setopt_array($handle, [
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_FOLLOWLOCATION => true,
-            CURLOPT_MAXREDIRS => 5,
-            CURLOPT_CONNECTTIMEOUT => self::CONNECT_TIMEOUT,
-            CURLOPT_TIMEOUT => self::READ_TIMEOUT,
-            CURLOPT_USERAGENT => self::USER_AGENT,
-            CURLOPT_HTTPHEADER => $token === null ? [] : ["Authorization: Bearer $token"],
-            CURLOPT_HEADERFUNCTION => function ($handle, string $line) use (&$headers): int {
-                $parts = explode(':', $line, 2);
-                if (count($parts) === 2) {
-                    $headers[strtolower(trim($parts[0]))] = trim($parts[1]);
-                }
-                return strlen($line);
-            },
-            // Meer dan de limiet hoeven we niet binnen te halen.
-            CURLOPT_BUFFERSIZE => 65536,
-            CURLOPT_NOPROGRESS => false,
-            CURLOPT_PROGRESSFUNCTION => static function ($handle, $expected, $received): int {
-                return $received > self::MAX_DOWNLOAD_BYTES ? 1 : 0;
-            },
-        ]);
+        $response = $this->retry->run(fn(): Response => $this->transport->send(
+            sprintf(
+                'https://www.googleapis.com/drive/v3/files/%s?fields=name&supportsAllDrives=true',
+                $id
+            ),
+            ['User-Agent' => self::USER_AGENT, 'Authorization' => "Bearer $token"],
+        ));
 
-        $body = curl_exec($handle);
-        $status = (int) curl_getinfo($handle, CURLINFO_RESPONSE_CODE);
-        $error = curl_errno($handle);
-        $message = curl_error($handle);
-        curl_close($handle);
-
-        if ($error === CURLE_ABORTED_BY_CALLBACK) {
-            throw new GoogleDocsException(sprintf(
-                'Het document is groter dan de limiet van %d MB.',
-                intdiv(self::MAX_DOWNLOAD_BYTES, 1024 * 1024)
-            ));
-        }
-        if ($error === CURLE_OPERATION_TIMEDOUT) {
-            throw new GoogleDocsException('Google reageerde niet op tijd. Probeer het opnieuw.');
-        }
-        if ($body === false) {
-            throw new GoogleDocsException("Kan Google Docs niet bereiken: $message");
+        if ($response->status !== 200) {
+            return null;   // zonder naam kunnen we leven
         }
 
-        return [$body, $status, $headers];
+        $payload = json_decode($response->body, true);
+        $name = is_array($payload) ? ($payload['name'] ?? null) : null;
+
+        return is_string($name) && $name !== '' ? $name : null;
     }
 
-    /** @param array<string, string> $headers */
-    private function guard(int $status, array $headers, bool $authenticated): void
+    private function guard(Response $response, bool $signedIn): void
     {
-        if ($status === 401 || $status === 403) {
-            throw new DocumentAccessException(
-                'Geen toegang tot dit document. Deel het via "Iedereen met de link kan '
-                . 'bekijken"' . ($authenticated ? '' : ', of log in met een account dat '
-                . 'toegang heeft') . '.'
-            );
-        }
-        if ($status === 404) {
-            throw new DocumentAccessException(
-                'Document niet gevonden. Controleer of de link klopt en of het document '
-                . 'niet verwijderd is.'
-            );
+        $status = $response->status;
+
+        if ($status === 401 || $status === 403 || $status === 404) {
+            throw new DocumentAccessException($this->noAccess($status, $signedIn));
         }
         if ($status === 429) {
             throw new GoogleDocsException(
@@ -182,13 +237,44 @@ class GoogleDocs
             throw new GoogleDocsException("Google antwoordde met HTTP $status.");
         }
 
-        $type = strtolower($headers['content-type'] ?? '');
-        if (str_contains($type, 'text/html')) {
-            throw new DocumentAccessException(
-                'Het document is niet openbaar. Google stuurde een inlogpagina in plaats '
-                . 'van het document. Zet het op "Iedereen met de link kan bekijken".'
+        if (str_contains(strtolower($response->header('content-type')), 'text/html')) {
+            throw new DocumentAccessException($signedIn
+                ? 'Google stuurde een webpagina in plaats van het document. '
+                    . 'Controleer of het document met het serviceaccount gedeeld is.'
+                : 'Het document is niet openbaar. Google stuurde een inlogpagina in '
+                    . 'plaats van het document. Zet het op "Iedereen met de link kan '
+                    . 'bekijken".');
+        }
+    }
+
+    /**
+     * De melding die je wél verder helpt.
+     *
+     * Bij een serviceaccount is "geen toegang" bijna altijd hetzelfde: het
+     * document is niet met dat adres gedeeld. Dus staat dat adres erin — dan
+     * kun je het meteen kopiëren naar de deelknop.
+     */
+    private function noAccess(int $status, bool $signedIn): string
+    {
+        $email = $this->account?->clientEmail();
+
+        if ($email !== null && $signedIn) {
+            return sprintf(
+                "Geen toegang (HTTP %d). Bestaat het document, en is het gedeeld met "
+                . "%s?\n\nDeel het in Google Docs via Delen > voeg %s toe als Kijker.",
+                $status,
+                $email,
+                $email
             );
         }
+
+        if ($status === 404) {
+            return 'Document niet gevonden. Controleer of de link klopt en of het '
+                . 'document niet verwijderd is.';
+        }
+
+        return 'Geen toegang tot dit document. Deel het via "Iedereen met de link kan '
+            . 'bekijken"' . ($signedIn ? '' : ', of stel een serviceaccount in') . '.';
     }
 
     /** Google zet de titel van het document in de Content-Disposition. */

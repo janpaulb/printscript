@@ -268,6 +268,7 @@ function showPage(): void
     header('Content-Type: text/html; charset=utf-8');
     $version = PRINTSCRIPT_VERSION;
     $warning = environmentWarning();
+    $sharing = sharingHint();
 
     echo <<<HTML
     <!DOCTYPE html>
@@ -305,7 +306,7 @@ function showPage(): void
                  placeholder="https://docs.google.com/document/d/…/edit"
                  autocomplete="off" spellcheck="false">
           <p class="field-hint">
-            Het document moet gedeeld zijn via <strong>Iedereen met de link&nbsp;→&nbsp;Kijker</strong>.
+            $sharing
             Plakken is genoeg — dan begint het meteen.
           </p>
         </div>
@@ -384,6 +385,26 @@ function showPage(): void
     </body>
     </html>
     HTML;
+}
+
+/**
+ * Hoe een document gedeeld moet zijn — dat hangt ervan af of er een
+ * serviceaccount is ingesteld.
+ *
+ * Staat het er, dan hoeft een script nooit meer openbaar: delen met dat ene
+ * adres is genoeg, en dan is er ook niets meer om later weer op privé te
+ * zetten. Daarom staat het adres er voluit bij, klaar om te kopiëren.
+ */
+function sharingHint(): string
+{
+    $account = PrintScript\GoogleDocs::configured()->signedInAs();
+    if ($account === null) {
+        return 'Het document moet gedeeld zijn via <strong>Iedereen met de '
+            . 'link&nbsp;→&nbsp;Kijker</strong>.';
+    }
+
+    return 'Deel het document met <strong>' . htmlspecialchars($account, ENT_QUOTES)
+        . '</strong> (Delen&nbsp;→&nbsp;Kijker). Openbaar zetten hoeft dan niet.';
 }
 
 /** Ontbreekt er iets op deze server, dan zegt de pagina dat meteen. */
