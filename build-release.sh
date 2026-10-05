@@ -17,7 +17,8 @@ echo "Bouwen..."
 rm -rf build printscript-php.zip
 mkdir -p "$BUILD"
 
-cp -r index.php .htaccess assets fonts src vendor composer.json "$BUILD/"
+cp -r index.php .htaccess assets bin fonts src vendor composer.json "$BUILD/"
+chmod +x "$BUILD/bin/printscript"
 cp README.md "$BUILD/LEESMIJ.md"
 
 command -v zip >/dev/null 2>&1 || { echo "zip niet gevonden."; exit 1; }

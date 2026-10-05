@@ -80,6 +80,7 @@ jobs:
           unzip -q printscript-php.zip -d /tmp/check
           for path in index.php .htaccess vendor/autoload.php assets/app.js \
                       src/Pipeline.php vendor/mpdf/mpdf/src/Mpdf.php \
+                      bin/printscript src/Google/ServiceAccount.php \
                       fonts/LiberationSans-Regular.ttf fonts/LiberationSerif-Regular.ttf \
                       fonts/LiberationMono-Regular.ttf; do
             test -e "/tmp/check/printscript/$path" || {
@@ -93,6 +94,9 @@ jobs:
             $pdf = $m->Output("", "S");
             exit(str_starts_with($pdf, "%PDF") ? 0 : 1);
           '
+          # En de sleutelcontrole hoort te draaien zonder sleutel, zonder vast te lopen.
+          php /tmp/check/printscript/bin/printscript --check 2>&1 | grep -q "Geen sleutelbestand gevonden" || {
+            echo "bin/printscript --check doet het niet"; exit 1; }
           echo "Pakket compleet en werkend."
 
       - name: Bij de release zetten
