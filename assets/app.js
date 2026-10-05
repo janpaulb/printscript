@@ -23,6 +23,7 @@
   var previewReady = false;
   var printWhenReady = false;
   var printedSource = null;
+  var signedIn = false;
 
   preview.addEventListener('load', function () {
     if (!objectUrl) { return; }
@@ -169,9 +170,12 @@
 
   /* Om hier te komen moet het document op "iedereen met de link" staan. Na
      het printen is dat niet meer nodig, en het is precies het soort ding dat
-     je vergeet. Alleen bij een link: een geupload bestand staat nergens open. */
+     je vergeet. Alleen bij een link: een geupload bestand staat nergens open.
+     En niet als we met een serviceaccount zijn ingelogd — dan hoefde het
+     document nooit openbaar, dus valt er ook niets terug te zetten. */
   function remind() {
-    el('reminder').classList.toggle('is-hidden', printedSource !== 'url');
+    var needed = printedSource === 'url' && !signedIn;
+    el('reminder').classList.toggle('is-hidden', !needed);
   }
 
   function fail(message) {
@@ -219,6 +223,7 @@
     show('busy');
     converted = urlInput.value.trim();
     printedSource = mode;
+    signedIn = false;
     el('reminder').classList.add('is-hidden');
     el('busy-text').textContent = mode === 'url'
       ? 'Document ophalen bij Google…'
@@ -271,6 +276,8 @@
     objectUrl = URL.createObjectURL(blob);
     previewReady = false;
     printWhenReady = el('opt-autoprint').checked;
+
+    signedIn = Boolean(summary && summary.signed_in);
 
     el('result-name').textContent = filename;
     el('download').href = objectUrl;

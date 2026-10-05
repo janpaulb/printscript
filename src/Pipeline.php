@@ -67,12 +67,21 @@ final class Pipeline
         ?string $accessToken = null,
         ?GoogleDocs $client = null
     ): ConversionResult {
-        $document = ($client ?? new GoogleDocs())->download($url, $accessToken);
-        return $this->convertDocx(
+        $warning = null;
+        $client ??= GoogleDocs::configured($warning);
+
+        $document = $client->download($url, $accessToken);
+        $result = $this->convertDocx(
             $document->data,
             $options,
             $document->title ?? substr($document->id, 0, 12)
         );
+
+        if ($client->signedInAs() !== null) {
+            $result = $result->withSignedIn();
+        }
+
+        return $warning === null ? $result : $result->withWarning($warning);
     }
 
     /** Een downloadnaam die op elk platform veilig is, zonder extensie. */

@@ -1,0 +1,112 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+/**
+ * printscript <document-id-of-link> [uit.pdf]
+ *
+ * Dezelfde pijplijn als de webpagina, maar vanaf de commandline. Handig om
+ * de koppeling met Google één keer te controleren: hij zegt met welk
+ * serviceaccount hij inlogt en waar hij de sleutel vandaan haalt.
+ */
+
+use PrintScript\DocumentAccessException;
+use PrintScript\Google\Keyfile;
+use PrintScript\GoogleDocs;
+use PrintScript\GoogleDocsException;
+use PrintScript\InvalidDocxException;
+use PrintScript\Options;
+use PrintScript\Pipeline;
+
+$autoload = dirname(__DIR__) . '/vendor/autoload.php';
+if (!is_file($autoload)) {
+    fwrite(STDERR, "De map vendor/ ontbreekt. Draai: composer install --no-dev\n");
+    exit(1);
+}
+require $autoload;
+
+$arguments = array_slice($argv, 1);
+$options = new Options();
+
+if ($arguments === [] || in_array($arguments[0], ['-h', '--help'], true)) {
+    fwrite(STDERR, <<<HELP
+    printscript <document-id-of-link> [uit.pdf]
+    printscript --check
+
+      --check        kijkt of de sleutel gevonden wordt en zegt met welk
+                     serviceaccount er wordt ingelogd
+      --alles        alle afbeeldingen behouden, niet alleen die op pagina 1
+
+    HELP);
+    exit($arguments === [] ? 1 : 0);
+}
+
+if ($arguments[0] === '--check') {
+    $path = Keyfile::locate();
+    if ($path === null) {
+        fwrite(STDERR, "Geen sleutelbestand gevonden. Gezocht op:\n  "
+            . implode("\n  ", Keyfile::candidates()) . "\n\n"
+            . "Zonder sleutel werken alleen openbare documenten.\n");
+        exit(1);
+    }
+    try {
+        $keys = Keyfile::read($path);
+    } catch (Throwable $error) {
+        fwrite(STDERR, $error->getMessage() . "\n");
+        exit(1);
+    }
+    echo "Sleutel:         $path\n";
+    echo "Serviceaccount:  {$keys['client_email']}\n";
+    if (Keyfile::looseReadRights($path)) {
+        echo "Let op:          het bestand is voor iedereen leesbaar — chmod 600\n";
+    }
+    echo "\nDeel een document met dat adres (Delen > Kijker) en het is te printen.\n";
+    exit(0);
+}
+
+$arguments = array_values(array_filter($arguments, static function (string $argument) use (&$options): bool {
+    if ($argument === '--alles') {
+        $options = new Options(imagesFirstPageOnly: false);
+        return false;
+    }
+    return true;
+}));
+
+$source = $arguments[0];
+$target = $arguments[1] ?? null;
+
+try {
+    $warning = null;
+    $client = GoogleDocs::configured($warning);
+    if ($warning !== null) {
+        fwrite(STDERR, "Waarschuwing: $warning\n");
+    }
+    $signedIn = $client->signedInAs();
+    fwrite(STDERR, $signedIn === null
+        ? "Geen serviceaccount: alleen openbare documenten.\n"
+        : "Ingelogd als $signedIn.\n");
+
+    $result = (new Pipeline())->convertGoogleDoc($source, $options, null, $client);
+} catch (DocumentAccessException | GoogleDocsException | InvalidDocxException $error) {
+    fwrite(STDERR, $error->getMessage() . "\n");
+    exit(1);
+} catch (Throwable $error) {
+    fwrite(STDERR, 'Conversie mislukt: ' . $error->getMessage() . "\n");
+    exit(1);
+}
+
+$target ??= $result->filename;
+file_put_contents($target, $result->pdf);
+
+fwrite(STDERR, sprintf(
+    "%s — %d pagina's%s\n",
+    $target,
+    $result->pageCount,
+    $result->imagesRemoved > 0
+        ? sprintf(', %d afbeelding(en) na pagina 1 verwijderd', $result->imagesRemoved)
+        : ''
+));
+foreach ($result->warnings as $note) {
+    fwrite(STDERR, "  - $note\n");
+}
