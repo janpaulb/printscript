@@ -79,6 +79,139 @@ final class GoogleServiceAccountTest extends TestCase
         $this->assertSame(realpath($expected), realpath((string) Keyfile::locate()));
     }
 
+    /**
+     * De naam die Google zelf aan de sleutel geeft, moet gewoon werken.
+     *
+     * Dit ging mis in het echt: de map klopte, maar het bestand heette
+     * titelaar-serviceaccount.json en printscript zocht google.json. Hij vond
+     * niets, viel terug op de openbare route en meldde "geen toegang" — een
+     * melding die naar de verkeerde oorzaak wijst. De mapnaam is nu leidend,
+     * niet de bestandsnaam.
+     */
+    public function testAnyJsonInTheKeyFolderCounts(): void
+    {
+        $_SERVER['DOCUMENT_ROOT'] = $this->directory . '/domains/site/public_html';
+        $expected = $this->writeKeyfile(
+            $this->directory . '/domains/site/printscript-keys/titelaar-serviceaccount.json'
+        );
+
+        $this->assertSame(realpath($expected), realpath((string) Keyfile::locate()));
+    }
+
+    /** Staat google.json er óók, dan wint die — anders is het maar net hoe het sorteert. */
+    public function testTheDocumentedNameWinsWhenThereAreSeveral(): void
+    {
+        $_SERVER['DOCUMENT_ROOT'] = $this->directory . '/domains/site/public_html';
+        $folder = $this->directory . '/domains/site/printscript-keys';
+        $this->writeKeyfile($folder . '/titelaar-serviceaccount.json');
+        $documented = $this->writeKeyfile($folder . '/google.json');
+
+        $this->assertSame(realpath($documented), realpath((string) Keyfile::locate()));
+    }
+
+    /** Zonder sleutel zegt de melding waar gekeken is, niet alleen dát het misging. */
+    public function testWithoutAKeyTheErrorSaysWhereItLooked(): void
+    {
+        $_SERVER['DOCUMENT_ROOT'] = $this->directory . '/domains/site/public_html';
+        $transport = new FakeTransport([new Response(403, '')]);
+        $docs = new GoogleDocs(null, $transport, new Retry(1, static function (): void {}));
+
+        try {
+            $docs->download('1eN-CHE5oC_6CxPn7NXnRX25S7RYrn8dE');
+            $this->fail('hier hoorde een fout te komen');
+        } catch (DocumentAccessException $error) {
+            $this->assertStringContainsString('printscript-keys', $error->getMessage());
+            $this->assertStringContainsString('*.json', $error->getMessage(),
+                'elk .json-bestand telt, en dat moet er ook staan');
+        }
+    }
+
+    /**
+     * "Geen toegang" heeft bij Drive heel verschillende oorzaken die er van
+     * buiten identiek uitzien. Welke het is staat in Googles eigen antwoord,
+     * dus dat moet eruit — anders zoek je naar een deelprobleem dat er niet is.
+     *
+     * @dataProvider refusals
+     */
+    public function testGoogleOwnReasonDecidesTheMessage(
+        string $body,
+        string $expected,
+        string $mustContain
+    ): void {
+        $transport = new FakeTransport([
+            new Response(200, (string) json_encode(['access_token' => 'ya29.t', 'expires_in' => 3600])),
+            new Response(403, $body),
+        ]);
+        $docs = new GoogleDocs(
+            ServiceAccount::fromKeyfile($this->writeKeyfile($this->directory . '/k.json'), $transport),
+            $transport,
+            new Retry(1, static function (): void {})
+        );
+
+        try {
+            $docs->download('1eN-CHE5oC_6CxPn7NXnRX25S7RYrn8dE');
+            $this->fail('hier hoorde een fout te komen');
+        } catch (DocumentAccessException $error) {
+            $this->assertStringContainsString($expected, $error->getMessage());
+            $this->assertStringContainsString($mustContain, $error->getMessage(),
+                'Googles eigen uitleg hoort er altijd onder te staan');
+        }
+    }
+
+    /** @return array<string, array{string, string, string}> */
+    public static function refusals(): array
+    {
+        $drive = static fn(string $reason, string $message): string => (string) json_encode([
+            'error' => ['errors' => [['reason' => $reason]], 'code' => 403, 'message' => $message],
+        ]);
+
+        return [
+            'Drive-API staat uit' => [
+                $drive('accessNotConfigured',
+                    'Google Drive API has not been used in project titelaar before or it is disabled.'),
+                'Drive API staat uit',
+                'has not been used in project',
+            ],
+            'document te groot om te exporteren' => [
+                $drive('exportSizeLimitExceeded', 'This file is too large to be exported.'),
+                'te groot voor de export',
+                'too large to be exported',
+            ],
+            'te veel verzoeken' => [
+                $drive('rateLimitExceeded', 'Rate Limit Exceeded'),
+                'te veel verzoeken',
+                'Rate Limit Exceeded',
+            ],
+            'echt niet gedeeld' => [
+                $drive('insufficientFilePermissions',
+                    'The user does not have sufficient permissions for this file.'),
+                'gedeeld met titelaar@titelaar.iam.gserviceaccount.com',
+                'sufficient permissions',
+            ],
+        ];
+    }
+
+    /** Bij de Drive-API-fout staat de knop erbij waar je hem aanzet. */
+    public function testTheDisabledApiMessageLinksToTheRightProject(): void
+    {
+        $transport = new FakeTransport([
+            new Response(200, (string) json_encode(['access_token' => 'ya29.t', 'expires_in' => 3600])),
+            new Response(403, (string) json_encode([
+                'error' => ['errors' => [['reason' => 'accessNotConfigured']], 'message' => 'disabled'],
+            ])),
+        ]);
+        $docs = new GoogleDocs(
+            ServiceAccount::fromKeyfile($this->writeKeyfile($this->directory . '/k.json'), $transport),
+            $transport,
+            new Retry(1, static function (): void {})
+        );
+
+        $this->expectExceptionMessageMatches(
+            '~console\.cloud\.google\.com/apis/library/drive\.googleapis\.com\?project=titelaar~'
+        );
+        $docs->download('1eN-CHE5oC_6CxPn7NXnRX25S7RYrn8dE');
+    }
+
     public function testTheEnvironmentVariableWins(): void
     {
         $_SERVER['DOCUMENT_ROOT'] = $this->directory . '/domains/site/public_html';

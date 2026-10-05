@@ -48,6 +48,12 @@ final class ServiceAccount
         return new self(Keyfile::read($path), $transport);
     }
 
+    /** Het project waar dit account bij hoort — handig in foutmeldingen. */
+    public function projectId(): string
+    {
+        return $this->keys['project_id'] ?? '';
+    }
+
     /** Het adres waarmee een document gedeeld moet zijn. */
     public function clientEmail(): string
     {

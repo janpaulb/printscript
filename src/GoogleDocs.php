@@ -220,7 +220,7 @@ class GoogleDocs
         $status = $response->status;
 
         if ($status === 401 || $status === 403 || $status === 404) {
-            throw new DocumentAccessException($this->noAccess($status, $signedIn));
+            throw new DocumentAccessException($this->noAccess($status, $signedIn, $response));
         }
         if ($status === 429) {
             throw new GoogleDocsException(
@@ -250,31 +250,112 @@ class GoogleDocs
     /**
      * De melding die je wél verder helpt.
      *
-     * Bij een serviceaccount is "geen toegang" bijna altijd hetzelfde: het
-     * document is niet met dat adres gedeeld. Dus staat dat adres erin — dan
-     * kun je het meteen kopiëren naar de deelknop.
+     * "Geen toegang" heeft bij Drive een handvol heel verschillende oorzaken
+     * die er van buiten identiek uitzien: het document is niet gedeeld, de
+     * Drive-API staat uit, of de export is te groot. Welke het is, staat in
+     * Googles eigen antwoord — dus lezen we dat uit, en zetten we het er
+     * altijd onder. Zonder die regel sta je te zoeken naar een deelprobleem
+     * dat er niet is.
      */
-    private function noAccess(int $status, bool $signedIn): string
+    private function noAccess(int $status, bool $signedIn, Response $response): string
     {
+        [$reason, $detail] = self::reasonFrom($response);
         $email = $this->account?->clientEmail();
+        $footer = $detail === '' ? '' : "\n\nGoogle zegt erbij:\n$detail";
+
+        if (self::looksLike($reason, $detail, ['accessNotConfigured', 'SERVICE_DISABLED',
+            'has not been used in project', 'is disabled'])) {
+            $project = $this->account?->projectId() ?? '';
+            return sprintf(
+                "De Google Drive API staat uit%s.\n\nZet hem aan in de Google Cloud "
+                . "Console: APIs & Services > Library > Google Drive API > Enable%s. "
+                . "Na het aanzetten kan het een minuut duren voor het werkt.%s",
+                $project === '' ? '' : " voor project \"$project\"",
+                $project === '' ? '' : "\n  https://console.cloud.google.com/apis/library/"
+                    . "drive.googleapis.com?project=" . rawurlencode($project),
+                $footer
+            );
+        }
+
+        if (self::looksLike($reason, $detail, ['exportSizeLimitExceeded', 'too large to be exported'])) {
+            return 'Dit document is te groot voor de export van Drive (die stopt bij '
+                . "10 MB). Exporteer het in Google Docs zelf naar .docx en upload dat "
+                . "bestand hier.$footer";
+        }
+
+        if (self::looksLike($reason, $detail, ['rateLimitExceeded', 'userRateLimitExceeded',
+            'dailyLimitExceeded', 'quota'])) {
+            return "Google heeft de aanvraag tijdelijk geweigerd wegens te veel "
+                . "verzoeken. Probeer het over een minuut opnieuw.$footer";
+        }
 
         if ($email !== null && $signedIn) {
             return sprintf(
                 "Geen toegang (HTTP %d). Bestaat het document, en is het gedeeld met "
-                . "%s?\n\nDeel het in Google Docs via Delen > voeg %s toe als Kijker.",
+                . "%s?\n\nDeel het in Google Docs via Delen > voeg %s toe als Kijker.%s",
                 $status,
                 $email,
-                $email
+                $email,
+                $footer
             );
         }
 
         if ($status === 404) {
             return 'Document niet gevonden. Controleer of de link klopt en of het '
-                . 'document niet verwijderd is.';
+                . "document niet verwijderd is.$footer";
         }
 
-        return 'Geen toegang tot dit document. Deel het via "Iedereen met de link kan '
-            . 'bekijken"' . ($signedIn ? '' : ', of stel een serviceaccount in') . '.';
+        // Geen serviceaccount én geen toegang: dan is de kans groot dat de
+        // sleutel er wél is maar niet gevonden wordt. Zeg dus waar is gekeken,
+        // anders staat iemand te zoeken naar een fout die er niet is.
+        return "Geen toegang tot dit document.\n\n"
+            . "Er is geen serviceaccount ingesteld. Gezocht op:\n  "
+            . Keyfile::searchedIn()
+            . "\n\nZet het sleutelbestand in een van die mappen, of deel het "
+            . "document via \"Iedereen met de link kan bekijken\".$footer";
+    }
+
+    /**
+     * Reden en uitleg uit Googles antwoord.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private static function reasonFrom(Response $response): array
+    {
+        $payload = json_decode($response->body, true);
+        if (!is_array($payload) || !isset($payload['error'])) {
+            return ['', ''];
+        }
+
+        $error = $payload['error'];
+        if (is_string($error)) {
+            return [$error, (string) ($payload['error_description'] ?? $error)];
+        }
+        if (!is_array($error)) {
+            return ['', ''];
+        }
+
+        $reason = '';
+        if (isset($error['errors'][0]['reason']) && is_string($error['errors'][0]['reason'])) {
+            $reason = $error['errors'][0]['reason'];
+        } elseif (isset($error['status']) && is_string($error['status'])) {
+            $reason = $error['status'];
+        }
+
+        $detail = isset($error['message']) && is_string($error['message']) ? $error['message'] : '';
+
+        return [$reason, trim($detail)];
+    }
+
+    /** @param string[] $needles */
+    private static function looksLike(string $reason, string $detail, array $needles): bool
+    {
+        foreach ($needles as $needle) {
+            if (stripos($reason, $needle) !== false || stripos($detail, $needle) !== false) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Google zet de titel van het document in de Content-Disposition. */
