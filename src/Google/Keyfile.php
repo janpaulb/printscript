@@ -21,8 +21,18 @@ namespace PrintScript\Google;
  */
 final class Keyfile
 {
-    /** Waar we kijken als er niets is ingesteld, op volgorde. */
-    private const CONVENTIONS = [
+    /**
+     * Mappen waarin élk .json-bestand als sleutel telt.
+     *
+     * Niet één vaste bestandsnaam. Google geeft zijn sleutel een eigen naam
+     * mee en iedereen laat die staan — titelaar-serviceaccount.json,
+     * project-abc123.json. Wie zo'n bestand in deze map zet heeft precies
+     * gedaan wat de bedoeling was; dan moet het ook werken.
+     */
+    private const FOLDERS = ['printscript-keys', 'private'];
+
+    /** Namen waar we eerst naar kijken, voor als er meer in de map staat. */
+    private const PREFERRED = [
         'printscript-keys/google.json',
         'private/printscript-google.json',
     ];
@@ -42,12 +52,20 @@ final class Keyfile
                 return $path;
             }
         }
+
+        foreach (self::searchFolders() as $folder) {
+            $found = glob("$folder/*.json") ?: [];
+            if ($found !== []) {
+                sort($found);
+                return $found[0];
+            }
+        }
+
         return null;
     }
 
     /**
-     * Alle plekken waar we kijken — ook voor de foutmelding, zodat iemand die
-     * het bestand ergens anders heeft neergezet meteen ziet waar het hoort.
+     * De paden die we letterlijk proberen — ook voor de foutmelding.
      *
      * @return string[]
      */
@@ -57,11 +75,40 @@ final class Keyfile
         $paths = is_string($set) && trim($set) !== '' ? [trim($set)] : [];
 
         foreach (self::parentsOfTheWebRoot() as $parent) {
-            foreach (self::CONVENTIONS as $convention) {
-                $paths[] = "$parent/$convention";
+            foreach (self::PREFERRED as $preferred) {
+                $paths[] = "$parent/$preferred";
             }
         }
         return array_values(array_unique($paths));
+    }
+
+    /**
+     * De mappen waarin elk .json-bestand meetelt.
+     *
+     * @return string[]
+     */
+    public static function searchFolders(): array
+    {
+        $folders = [];
+        foreach (self::parentsOfTheWebRoot() as $parent) {
+            foreach (self::FOLDERS as $folder) {
+                $folders[] = "$parent/$folder";
+            }
+        }
+        return array_values(array_unique($folders));
+    }
+
+    /** Waar we gezocht hebben, in mensentaal — voor als er niets gevonden is. */
+    public static function searchedIn(): string
+    {
+        $lines = [];
+        foreach (self::candidates() as $path) {
+            $lines[] = $path;
+        }
+        foreach (self::searchFolders() as $folder) {
+            $lines[] = "$folder/*.json  (elk .json-bestand in deze map)";
+        }
+        return implode("\n  ", array_unique($lines));
     }
 
     /**
@@ -107,7 +154,7 @@ final class Keyfile
             throw new GoogleAuthException(sprintf(
                 "Het sleutelbestand staat niet op %s.\nGezocht op:\n  %s",
                 $path,
-                implode("\n  ", self::candidates())
+                self::searchedIn()
             ));
         }
 
@@ -163,7 +210,7 @@ final class Keyfile
             . 'snelkoppeling naar public_html.',
             $resolved,
             $root,
-            dirname($root) . '/' . self::CONVENTIONS[0]
+            dirname($root) . '/' . self::PREFERRED[0]
         ));
     }
 
