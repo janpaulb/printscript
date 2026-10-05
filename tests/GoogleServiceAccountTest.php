@@ -174,7 +174,7 @@ final class GoogleServiceAccountTest extends TestCase
             ],
             'document te groot om te exporteren' => [
                 $drive('exportSizeLimitExceeded', 'This file is too large to be exported.'),
-                'te groot voor de export',
+                'te groot is',
                 'too large to be exported',
             ],
             'te veel verzoeken' => [
@@ -359,9 +359,16 @@ final class GoogleServiceAccountTest extends TestCase
     {
         $transport = new FakeTransport([
             new Response(200, (string) json_encode(['access_token' => 'ya29.test', 'expires_in' => 3600])),
-            new Response(200, 'PK' . str_repeat('x', 40),
-                ['content-type' => 'application/octet-stream']),
-            new Response(200, (string) json_encode(['name' => 'REPETITIESCRIPT S04E04'])),
+            new Response(200, (string) json_encode([
+                'name' => 'REPETITIESCRIPT S04E04',
+                'mimeType' => 'application/vnd.google-apps.document',
+                'exportLinks' => [
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                        => 'https://docs.google.com/feeds/download/documents/export/Export'
+                            . '?id=1eN-CHE5oC_6CxPn7NXnRX25S7RYrn8dE&exportFormat=docx',
+                ],
+            ])),
+            new Response(200, 'PK' . str_repeat('x', 40)),
         ]);
         $docs = new GoogleDocs(
             ServiceAccount::fromKeyfile($this->writeKeyfile($this->directory . '/k.json'), $transport),
@@ -375,9 +382,94 @@ final class GoogleServiceAccountTest extends TestCase
 
         $this->assertSame('REPETITIESCRIPT S04E04', $document->title);
         $this->assertStringStartsWith('PK', $document->data);
-        $this->assertStringContainsString('drive/v3/files/1eN-CHE5oC_6CxPn7NXnRX25S7RYrn8dE/export',
-            $transport->calls[1]['url'], 'ingelogd exporteren gaat via Drive, niet via docs.google.com');
-        $this->assertSame('Bearer ya29.test', $transport->calls[1]['headers']['Authorization']);
+        $this->assertStringContainsString('drive/v3/files/1eN-CHE5oC_6CxPn7NXnRX25S7RYrn8dE',
+            $transport->calls[1]['url'], 'eerst de gegevens van het bestand ophalen');
+        $this->assertSame('Bearer ya29.test', $transport->calls[2]['headers']['Authorization']);
+    }
+
+    /**
+     * De grens die dit in het echt liet stuklopen.
+     *
+     * De gewone export van Drive stopt bij tien megabyte, en een
+     * repetitiescript met veertig schermafdrukken zit daar zo overheen. Het
+     * adres uit exportLinks kent die grens niet — dat is hetzelfde adres dat
+     * Google Docs zelf gebruikt bij Downloaden. Dus pakken we dat, en komen
+     * we aan die limiet niet eens toe.
+     */
+    public function testALargeDocumentGoesThroughTheExportLinkInsteadOfTheTenMegabyteExport(): void
+    {
+        $link = 'https://docs.google.com/feeds/download/documents/export/Export'
+            . '?id=1eN-CHE5oC_6CxPn7NXnRX25S7RYrn8dE&exportFormat=docx';
+        $transport = new FakeTransport([
+            new Response(200, (string) json_encode(['access_token' => 'ya29.t', 'expires_in' => 3600])),
+            new Response(200, (string) json_encode([
+                'name' => 'Groot script',
+                'mimeType' => 'application/vnd.google-apps.document',
+                'exportLinks' => [
+                    'application/vnd.openxmlformats-officedocument.wordprocessingml.document' => $link,
+                ],
+            ])),
+            new Response(200, 'PK' . str_repeat('y', 5000)),
+        ]);
+        $docs = new GoogleDocs(
+            ServiceAccount::fromKeyfile($this->writeKeyfile($this->directory . '/k.json'), $transport),
+            $transport,
+            new Retry(6, static function (): void {})
+        );
+
+        $document = $docs->download('1eN-CHE5oC_6CxPn7NXnRX25S7RYrn8dE');
+
+        $this->assertSame($link, $transport->calls[2]['url'],
+            'het exportadres van Google zelf, niet files/export met zijn 10 MB-grens');
+        $this->assertStringStartsWith('PK', $document->data);
+        $this->assertSame('Groot script', $document->title);
+    }
+
+    /** Een .docx dat al in Drive staat hoeft niet geëxporteerd te worden. */
+    public function testAWordFileInDriveIsDownloadedAsIs(): void
+    {
+        $transport = new FakeTransport([
+            new Response(200, (string) json_encode(['access_token' => 'ya29.t', 'expires_in' => 3600])),
+            new Response(200, (string) json_encode([
+                'name' => 'Aangeleverd script.docx',
+                'mimeType' => 'application/vnd.openxmlformats-officedocument'
+                    . '.wordprocessingml.document',
+            ])),
+            new Response(200, 'PK' . str_repeat('z', 40)),
+        ]);
+        $docs = new GoogleDocs(
+            ServiceAccount::fromKeyfile($this->writeKeyfile($this->directory . '/k.json'), $transport),
+            $transport,
+            new Retry(6, static function (): void {})
+        );
+
+        $document = $docs->download('1eN-CHE5oC_6CxPn7NXnRX25S7RYrn8dE');
+
+        $this->assertStringContainsString('alt=media', $transport->calls[2]['url'],
+            'gewoon ophalen, er valt niets te exporteren');
+        $this->assertSame('Aangeleverd script.docx', $document->title);
+    }
+
+    /** Zonder exportadressen blijft files/export over, als vangnet. */
+    public function testWithoutExportLinksItFallsBackToTheRegularExport(): void
+    {
+        $transport = new FakeTransport([
+            new Response(200, (string) json_encode(['access_token' => 'ya29.t', 'expires_in' => 3600])),
+            new Response(200, (string) json_encode([
+                'name' => 'Script',
+                'mimeType' => 'application/vnd.google-apps.document',
+            ])),
+            new Response(200, 'PK' . str_repeat('x', 40)),
+        ]);
+        $docs = new GoogleDocs(
+            ServiceAccount::fromKeyfile($this->writeKeyfile($this->directory . '/k.json'), $transport),
+            $transport,
+            new Retry(6, static function (): void {})
+        );
+
+        $docs->download('1eN-CHE5oC_6CxPn7NXnRX25S7RYrn8dE');
+
+        $this->assertStringContainsString('/export?mimeType=', $transport->calls[2]['url']);
     }
 
     /** Zonder sleutel blijft het de openbare weg, precies zoals voorheen. */

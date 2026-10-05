@@ -274,6 +274,22 @@ Het ondertekenen gebeurt met de hand (`openssl_sign`, veertig regels). De
 Google-clientbibliotheek is tientallen megabytes, en `vendor/` gaat bij dit
 project mee de hosting op.
 
+### De tien-megabytegrens van Drive, en hoe je eromheen komt
+
+`files/<id>/export` van Drive stopt bij tien megabyte. Een repetitiescript met
+veertig schermafdrukken zit daar zo overheen, en dan krijg je
+`exportSizeLimitExceeded` — een melding die klinkt alsof je document te groot
+is, terwijl alleen dat ene adres een grens heeft.
+
+Printscript haalt daarom eerst de gegevens van het bestand op
+(`fields=name,mimeType,exportLinks`) en gebruikt het adres uit `exportLinks`.
+Dat is hetzelfde adres dat Google Docs zelf gebruikt als je in het menu op
+*Downloaden* klikt, en dat kent die grens niet. Het kost geen extra verzoek:
+de naam van het document komt uit diezelfde aanroep.
+
+Staat er een `.docx` in Drive in plaats van een Google Document, dan wordt die
+gewoon opgehaald — er valt dan niets te exporteren.
+
 ### Een fatale fout mag geen lege 500 zijn
 
 Raakt PHP door zijn geheugen of zijn tijd heen, dan is dat geen fout die je
@@ -316,7 +332,7 @@ Het testgereedschap staat bewust in een eigen map (`vendor-dev/`), los van de
 `vendor/` die mee de server op gaat. Zo bevat die laatste precies wat er hoort
 en niets meer — 29 MB in plaats van ruim 2 GB.
 
-99 tests, een paar seconden. Ze bouwen `.docx`-pakketten met de hand
+110 tests, een paar seconden. Ze bouwen `.docx`-pakketten met de hand
 (`tests/DocxBuilder.php`) en controleren de **uitkomst in de PDF**
 (`tests/PdfInspector.php`): welke pagina's er zijn, welke afbeeldingen
 daadwerkelijk op welke pagina getekend worden, welke tekst er staat en welke er
